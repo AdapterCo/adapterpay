@@ -1,0 +1,122 @@
+# AdapterPay — PRODUÇÃO na VPS Debian 13 com o Traefik JÁ EXISTENTE.
+# - Não publica portas no host (nada de 80/443/3000): o Traefik roteia pela rede externa ${TRAEFIK_NETWORK}.
+# - Postgres e Redis ficam apenas na rede interna isolada (sem acesso à internet).
+# - API e worker têm rede de saída para chamar o Mercado Pago.
+# - O job `migrate` precisa concluir com sucesso antes de api/worker subirem.
+# Variáveis: .env no diretório do projeto (ver .env.example). Inspecione a VPS antes (infra/traefik/README.md).
+name: adapterpay
+
+x-app: &app
+  env_file: .env
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    <<: *app
+    image: adapterpay-migrate:${RELEASE:-latest}
+    build: { context: ., dockerfile: infra/docker/Dockerfile, target: migrate }
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [backend]
+
+  api:
+    <<: *app
+    image: adapterpay-api:${RELEASE:-latest}
+    build: { context: ., dockerfile: infra/docker/Dockerfile, target: api }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    secrets: [mp_platform_access_token]
+    networks: [backend, egress, traefik]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK}"
+      - "traefik.http.routers.adapterpay-api.rule=Host(`${APP_HOST}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.adapterpay-api.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.adapterpay-api.tls=true"
+      - "traefik.http.routers.adapterpay-api.tls.certresolver=${TRAEFIK_CERT_RESOLVER}"
+      - "traefik.http.routers.adapterpay-api.priority=100"
+      - "traefik.http.services.adapterpay-api.loadbalancer.server.port=4000"
+
+  worker:
+    <<: *app
+    image: adapterpay-worker:${RELEASE:-latest}
+    build: { context: ., dockerfile: infra/docker/Dockerfile, target: worker }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    secrets: [mp_platform_access_token]
+    networks: [backend, egress]
+    # Escala horizontal segura (lease por Order): docker compose up -d --scale worker=2
+    stop_grace_period: 30s
+
+  web:
+    <<: *app
+    image: adapterpay-web:${RELEASE:-latest}
+    build: { context: ., dockerfile: infra/docker/Dockerfile, target: web }
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [traefik]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK}"
+      - "traefik.http.routers.adapterpay-web.rule=Host(`${APP_HOST}`)"
+      - "traefik.http.routers.adapterpay-web.entrypoints=${TRAEFIK_ENTRYPOINT}"
+      - "traefik.http.routers.adapterpay-web.tls=true"
+      - "traefik.http.routers.adapterpay-web.tls.certresolver=${TRAEFIK_CERT_RESOLVER}"
+      - "traefik.http.routers.adapterpay-web.priority=10"
+      - "traefik.http.services.adapterpay-web.loadbalancer.server.port=3000"
+
+secrets:
+  mp_platform_access_token:
+    file: ./infra/secrets/mp_platform_access_token
+
+networks:
+  backend:
+    internal: true
+  egress: {}
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK}
+
+volumes:
+  pgdata:
+  redisdata:

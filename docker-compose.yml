@@ -1,0 +1,37 @@
+# Ambiente de DESENVOLVIMENTO local: somente Postgres e Redis (portas ligadas a 127.0.0.1).
+# API, worker e web rodam no host com `pnpm dev:*` (ver README).
+name: adapterpay-dev
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: adapterpay
+      POSTGRES_PASSWORD: adapterpay_dev
+      POSTGRES_DB: adapterpay
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adapterpay -d adapterpay"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata-dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata-dev:
+  redisdata-dev:

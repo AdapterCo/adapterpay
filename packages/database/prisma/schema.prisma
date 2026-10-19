@@ -1,0 +1,606 @@
+// AdapterPay — modelo de dados (seção 13).
+// Convenções: UUID interno, timestamps UTC (timestamptz), tenant_id em entidades multiempresa,
+// valores monetários em centavos inteiros (Int), nunca float.
+// Constraints que o Prisma não expressa (índices parciais) estão na migration SQL
+// (ver prisma/migrations/*_constraints/migration.sql).
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  PENDING_ACTIVATION
+  ACTIVE
+  SUSPENDED
+  CANCELED
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  DISABLED
+}
+
+enum TenantRole {
+  ADMIN
+  VENDEDOR
+  CONTADOR
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum MpConnectionStatus {
+  ACTIVE
+  NEEDS_RECONNECT
+  REVOKED
+  DISCONNECTED
+}
+
+enum PosStatus {
+  PENDING_REVIEW
+  ACTIVE
+  INACTIVE
+  REMOTE_MISSING
+  NEEDS_REGULARIZATION
+}
+
+enum ChargeStatus {
+  CREATING
+  PENDING
+  PAID
+  EXPIRED
+  CANCELLED
+  FAILED
+  RECONCILING
+  REFUNDED
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum BillingMethod {
+  PIX
+  CARD
+}
+
+enum InvoiceStatus {
+  OPEN
+  PAID
+  VOID
+  FAILED
+}
+
+enum InvoiceKind {
+  INITIAL
+  RENEWAL
+  UPGRADE
+}
+
+enum EmailTokenPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+  INVITE
+}
+
+enum ActorType {
+  USER
+  SUPERADMIN
+  SYSTEM
+  WORKER
+}
+
+model Tenant {
+  id           String       @id @default(uuid()) @db.Uuid
+  legalName    String       @map("legal_name")
+  tradeName    String       @map("trade_name")
+  /// CPF/CNPJ cifrado (AES-256-GCM)
+  taxIdEnc     String       @map("tax_id_enc")
+  /// HMAC-SHA256 do documento para busca/unicidade sem expor o valor
+  taxIdHash    String       @map("tax_id_hash")
+  status       TenantStatus @default(PENDING_ACTIVATION)
+  timezone     String       @default("America/Sao_Paulo")
+  logoUrl      String?      @map("logo_url")
+  brandColor   String?      @map("brand_color")
+  fiscalAddress String?     @map("fiscal_address")
+  allowSellerCancel Boolean @default(false) @map("allow_seller_cancel")
+  requireAdminMfa   Boolean @default(false) @map("require_admin_mfa")
+  suspendedReason String?   @map("suspended_reason")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(3)
+
+  memberships   TenantMembership[]
+  stores        Store[]
+  mpConnections MpConnection[]
+  posTerminals  PosTerminal[]
+  charges       Charge[]
+  subscription  Subscription?
+  invoices      Invoice[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  storeMemberships StoreMembership[]
+
+  @@index([status])
+  @@index([taxIdHash])
+  @@map("tenants")
+}
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  /// email normalizado (trim + lowercase)
+  email           String     @unique
+  name            String
+  passwordHash    String?    @map("password_hash")
+  status          UserStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz(3)
+  isSuperadmin    Boolean    @default(false) @map("is_superadmin")
+  mfaSecretEnc    String?    @map("mfa_secret_enc")
+  mfaEnabledAt    DateTime?  @map("mfa_enabled_at") @db.Timestamptz(3)
+  /// hashes SHA-256 dos códigos de recuperação ainda não usados
+  mfaRecoveryHashes String[] @default([]) @map("mfa_recovery_hashes")
+  failedLogins    Int        @default(0) @map("failed_logins")
+  lockedUntil     DateTime?  @map("locked_until") @db.Timestamptz(3)
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  memberships      TenantMembership[]
+  storeMemberships StoreMembership[]
+  sessions         Session[]
+  emailTokens      EmailToken[]
+  charges          Charge[]           @relation("ChargeSeller")
+  notifications    Notification[]
+
+  @@map("users")
+}
+
+model Session {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  /// SHA-256 do token do cookie; o token em claro nunca é armazenado
+  tokenHash     String    @unique @map("token_hash")
+  activeTenantId String?  @map("active_tenant_id") @db.Uuid
+  mfaVerifiedAt DateTime? @map("mfa_verified_at") @db.Timestamptz(3)
+  ip            String?
+  userAgent     String?   @map("user_agent")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model EmailToken {
+  id         String            @id @default(uuid()) @db.Uuid
+  userId     String            @map("user_id") @db.Uuid
+  tenantId   String?           @map("tenant_id") @db.Uuid
+  purpose    EmailTokenPurpose
+  tokenHash  String            @unique @map("token_hash")
+  expiresAt  DateTime          @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime?         @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("email_tokens")
+}
+
+model TenantMembership {
+  id        String           @id @default(uuid()) @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  role      TenantRole
+  status    MembershipStatus @default(ACTIVE)
+  isOwner   Boolean          @default(false) @map("is_owner")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+  @@index([tenantId, status])
+  @@map("tenant_memberships")
+}
+
+model StoreMembership {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  storeId   String   @map("store_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  store  Store  @relation(fields: [storeId, tenantId], references: [id, tenantId])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([storeId, userId])
+  @@index([tenantId, userId])
+  @@map("store_memberships")
+}
+
+model Store {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @map("tenant_id") @db.Uuid
+  name           String
+  /// {streetName, streetNumber, cityName, stateName, zipCode, reference, latitude, longitude}
+  address        Json?
+  timezone       String       @default("America/Sao_Paulo")
+  mpStoreId      String?      @map("mp_store_id")
+  mpExternalId   String?      @map("mp_external_id")
+  mpConnectionId String?      @map("mp_connection_id") @db.Uuid
+  status         RecordStatus @default(ACTIVE)
+  lastSyncAt     DateTime?    @map("last_sync_at") @db.Timestamptz(3)
+  syncError      String?      @map("sync_error")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id])
+  /// FK simples aqui; a FK composta (mp_connection_id, tenant_id) que impede vincular conexão MP
+  /// de outro tenant é criada na migration SQL de constraints (Prisma não expressa relação opcional composta).
+  mpConnection MpConnection?     @relation(fields: [mpConnectionId], references: [id])
+  posTerminals PosTerminal[]
+  charges      Charge[]
+  memberships  StoreMembership[]
+
+  @@unique([id, tenantId])
+  @@unique([mpConnectionId, mpStoreId])
+  @@index([tenantId, status])
+  @@map("stores")
+}
+
+model MpConnection {
+  id              String             @id @default(uuid()) @db.Uuid
+  tenantId        String             @map("tenant_id") @db.Uuid
+  mpUserId        String             @map("mp_user_id")
+  nickname        String?
+  email           String?
+  accessTokenEnc  String             @map("access_token_enc")
+  refreshTokenEnc String?            @map("refresh_token_enc")
+  tokenExpiresAt  DateTime?          @map("token_expires_at") @db.Timestamptz(3)
+  scopes          String[]           @default([])
+  liveMode        Boolean?           @map("live_mode")
+  status          MpConnectionStatus @default(ACTIVE)
+  lastSyncAt      DateTime?          @map("last_sync_at") @db.Timestamptz(3)
+  lastTestedAt    DateTime?          @map("last_tested_at") @db.Timestamptz(3)
+  lastError       String?            @map("last_error")
+  connectedById   String?            @map("connected_by_id") @db.Uuid
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  stores       Store[]
+  posTerminals PosTerminal[]
+  charges      Charge[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, mpUserId])
+  @@index([mpUserId])
+  @@map("mp_connections")
+}
+
+model PosTerminal {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  storeId            String    @map("store_id") @db.Uuid
+  mpConnectionId     String    @map("mp_connection_id") @db.Uuid
+  /// ID numérico do POS no Mercado Pago (string para não perder precisão)
+  mpPosId            String    @map("mp_pos_id")
+  mpStoreId          String?   @map("mp_store_id")
+  /// external_id do POS — usado em config.qr.external_pos_id das Orders. NÃO é o ID numérico.
+  externalId         String?   @map("external_id")
+  name               String
+  operatingMode      String?   @map("operating_mode")
+  /// BR Code do POS (qr_response.qr_code)
+  qrCode             String?   @map("qr_code")
+  qrCodeHash         String?   @map("qr_code_hash")
+  qrUuid             String?   @map("qr_uuid")
+  qrImageUrl         String?   @map("qr_image_url")
+  qrTemplateDocument String?   @map("qr_template_document")
+  qrTemplateImage    String?   @map("qr_template_image")
+  qrUpdatedAt        DateTime? @map("qr_updated_at") @db.Timestamptz(3)
+  remoteStatus       String?   @map("remote_status")
+  /// slug aleatório de alta entropia usado em /p/:publicSlug (rotacionável)
+  publicSlug         String    @unique @map("public_slug")
+  status             PosStatus @default(PENDING_REVIEW)
+  activeChargeId     String?   @unique @map("active_charge_id") @db.Uuid
+  createdRemotely    Boolean   @default(false) @map("created_remotely")
+  lastSyncAt         DateTime? @map("last_sync_at") @db.Timestamptz(3)
+  syncError          String?   @map("sync_error")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  store        Store        @relation(fields: [storeId, tenantId], references: [id, tenantId])
+  mpConnection MpConnection @relation(fields: [mpConnectionId, tenantId], references: [id, tenantId])
+  charges      Charge[]
+
+  @@unique([id, tenantId])
+  @@unique([mpConnectionId, mpPosId])
+  @@unique([mpConnectionId, externalId])
+  @@index([tenantId, status])
+  @@index([storeId])
+  @@map("pos_terminals")
+}
+
+model Charge {
+  id                String       @id @default(uuid()) @db.Uuid
+  tenantId          String       @map("tenant_id") @db.Uuid
+  storeId           String       @map("store_id") @db.Uuid
+  posId             String       @map("pos_id") @db.Uuid
+  sellerId          String       @map("seller_id") @db.Uuid
+  mpConnectionId    String       @map("mp_connection_id") @db.Uuid
+  /// Order ID do MP (ORD...)
+  orderId           String?      @unique @map("order_id")
+  /// transactions.payments[0].id (PAY...)
+  mpPaymentId       String?      @map("mp_payment_id")
+  externalReference String       @unique @map("external_reference")
+  idempotencyKey    String       @unique @map("idempotency_key")
+  /// chave enviada pelo cliente (Idempotency-Key) para retries da mesma requisição
+  clientRequestId   String?      @map("client_request_id")
+  /// snapshot do external_id do POS usado no payload
+  externalPosId     String       @map("external_pos_id")
+  amountCents       Int          @map("amount_cents")
+  currency          String       @default("BRL")
+  description       String?
+  status            ChargeStatus @default(CREATING)
+  statusReason      String?      @map("status_reason")
+  /// token aleatório não enumerável para /c/:publicToken, imutável
+  publicToken       String       @unique @map("public_token")
+  mpCreatedAt       DateTime?    @map("mp_created_at") @db.Timestamptz(3)
+  expiresAt         DateTime?    @map("expires_at") @db.Timestamptz(3)
+  paidAt            DateTime?    @map("paid_at") @db.Timestamptz(3)
+  terminalAt        DateTime?    @map("terminal_at") @db.Timestamptz(3)
+  lastPolledAt      DateTime?    @map("last_polled_at") @db.Timestamptz(3)
+  cancelRequestedAt DateTime?    @map("cancel_requested_at") @db.Timestamptz(3)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  store        Store          @relation(fields: [storeId, tenantId], references: [id, tenantId])
+  pos          PosTerminal    @relation(fields: [posId, tenantId], references: [id, tenantId])
+  seller       User           @relation("ChargeSeller", fields: [sellerId], references: [id])
+  mpConnection MpConnection   @relation(fields: [mpConnectionId, tenantId], references: [id, tenantId])
+  payments     Payment[]
+  events       PaymentEvent[]
+  pollingJob   PollingJob?
+
+  @@unique([tenantId, clientRequestId])
+  @@index([tenantId, createdAt])
+  @@index([posId, status])
+  @@index([status])
+  @@index([sellerId, createdAt])
+  @@map("charges")
+}
+
+model Payment {
+  id              String    @id @default(uuid()) @db.Uuid
+  chargeId        String    @map("charge_id") @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  mpConnectionId  String    @map("mp_connection_id") @db.Uuid
+  mpPaymentId     String    @map("mp_payment_id")
+  /// reference_id da transação (ID do pagamento na API /v1/payments)
+  mpReferenceId   String?   @map("mp_reference_id")
+  amountCents     Int       @map("amount_cents")
+  paidAmountCents Int       @map("paid_amount_cents")
+  /// tarifa efetiva — null quando o provedor não expõe (nunca inventar 0)
+  feeCents        Int?      @map("fee_cents")
+  netAmountCents  Int?      @map("net_amount_cents")
+  feeSyncedAt     DateTime? @map("fee_synced_at") @db.Timestamptz(3)
+  feeSyncAttempts Int       @default(0) @map("fee_sync_attempts")
+  method          String
+  status          String
+  statusDetail    String    @map("status_detail")
+  confirmedAt     DateTime  @map("confirmed_at") @db.Timestamptz(3)
+  refundedAt      DateTime? @map("refunded_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  charge Charge @relation(fields: [chargeId], references: [id])
+
+  @@unique([mpConnectionId, mpPaymentId])
+  @@index([chargeId])
+  @@index([tenantId, confirmedAt])
+  @@map("payments")
+}
+
+model PaymentEvent {
+  id                      String        @id @default(uuid()) @db.Uuid
+  chargeId                String        @map("charge_id") @db.Uuid
+  previousState           ChargeStatus? @map("previous_state")
+  newState                ChargeStatus  @map("new_state")
+  reason                  String?
+  /// resposta do provedor saneada (sem tokens)
+  providerPayloadRedacted Json?         @map("provider_payload_redacted")
+  occurredAt              DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  charge Charge @relation(fields: [chargeId], references: [id])
+
+  @@index([chargeId, occurredAt])
+  @@map("payment_events")
+}
+
+model PollingJob {
+  chargeId      String    @id @map("charge_id") @db.Uuid
+  nextAttemptAt DateTime  @map("next_attempt_at") @db.Timestamptz(3)
+  attempts      Int       @default(0)
+  consecutiveErrors Int   @default(0) @map("consecutive_errors")
+  lastError     String?   @map("last_error")
+  lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz(3)
+  leaseOwner    String?   @map("lease_owner")
+  leaseUntil    DateTime? @map("lease_until") @db.Timestamptz(3)
+  /// verificação pós-terminal para detectar pagamento atrasado
+  postTerminalCheckAt DateTime? @map("post_terminal_check_at") @db.Timestamptz(3)
+  done          Boolean   @default(false)
+
+  charge Charge @relation(fields: [chargeId], references: [id])
+
+  @@index([done, nextAttemptAt])
+  @@map("polling_jobs")
+}
+
+model Plan {
+  id         String   @id
+  name       String
+  priceCents Int      @map("price_cents")
+  maxPos     Int      @map("max_pos")
+  maxStores  Int      @map("max_stores")
+  maxUsers   Int      @map("max_users")
+  active     Boolean  @default(true)
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  subscriptions          Subscription[] @relation("SubscriptionPlan")
+  scheduledSubscriptions Subscription[] @relation("SubscriptionScheduledPlan")
+  invoices               Invoice[]      @relation("InvoicePlan")
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String             @id @default(uuid()) @db.Uuid
+  tenantId           String             @unique @map("tenant_id") @db.Uuid
+  planId             String             @map("plan_id")
+  method             BillingMethod?
+  status             SubscriptionStatus @default(PENDING)
+  startedAt          DateTime?          @map("started_at") @db.Timestamptz(3)
+  currentPeriodStart DateTime?          @map("current_period_start") @db.Timestamptz(3)
+  currentPeriodEnd   DateTime?          @map("current_period_end") @db.Timestamptz(3)
+  cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt         DateTime?          @map("canceled_at") @db.Timestamptz(3)
+  scheduledPlanId    String?            @map("scheduled_plan_id")
+  mpPreapprovalId    String?            @unique @map("mp_preapproval_id")
+  preapprovalStatus  String?            @map("preapproval_status")
+  nextPollAt         DateTime?          @map("next_poll_at") @db.Timestamptz(3)
+  lastPolledAt       DateTime?          @map("last_polled_at") @db.Timestamptz(3)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  plan          Plan      @relation("SubscriptionPlan", fields: [planId], references: [id])
+  scheduledPlan Plan?     @relation("SubscriptionScheduledPlan", fields: [scheduledPlanId], references: [id])
+  invoices      Invoice[]
+
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id                String        @id @default(uuid()) @db.Uuid
+  tenantId          String        @map("tenant_id") @db.Uuid
+  subscriptionId    String        @map("subscription_id") @db.Uuid
+  kind              InvoiceKind
+  planId            String        @map("plan_id")
+  method            BillingMethod
+  amountCents       Int           @map("amount_cents")
+  /// instante exato de vencimento em UTC
+  dueAt             DateTime      @map("due_at") @db.Timestamptz(3)
+  periodStart       DateTime?     @map("period_start") @db.Timestamptz(3)
+  periodEnd         DateTime?     @map("period_end") @db.Timestamptz(3)
+  paidAt            DateTime?     @map("paid_at") @db.Timestamptz(3)
+  status            InvoiceStatus @default(OPEN)
+  /// ID do pagamento (Pix) ou authorized_payment (cartão) no MP da plataforma
+  providerReference String?       @unique @map("provider_reference")
+  providerStatus    String?       @map("provider_status")
+  externalReference String        @unique @map("external_reference")
+  pixQrCode         String?       @map("pix_qr_code")
+  pixQrBase64       String?       @map("pix_qr_base64")
+  pixExpiresAt      DateTime?     @map("pix_expires_at") @db.Timestamptz(3)
+  attempts          Int           @default(0)
+  lastAttemptAt     DateTime?     @map("last_attempt_at") @db.Timestamptz(3)
+  nextPollAt        DateTime?     @map("next_poll_at") @db.Timestamptz(3)
+  lastError         String?       @map("last_error")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+  plan         Plan         @relation("InvoicePlan", fields: [planId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([status, dueAt])
+  @@index([status, nextPollAt])
+  @@map("invoices")
+}
+
+model AuditLog {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String?   @map("tenant_id") @db.Uuid
+  actorUserId   String?   @map("actor_user_id") @db.Uuid
+  actorType     ActorType @map("actor_type")
+  resourceType  String    @map("resource_type")
+  resourceId    String?   @map("resource_id")
+  action        String
+  before        Json?
+  after         Json?
+  ip            String?
+  userAgent     String?   @map("user_agent")
+  correlationId String?   @map("correlation_id")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}
+
+model OAuthState {
+  id           String    @id @default(uuid()) @db.Uuid
+  stateHash    String    @unique @map("state_hash")
+  tenantId     String    @map("tenant_id") @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  sessionId    String    @map("session_id") @db.Uuid
+  /// conexão sendo reconectada (opcional)
+  connectionId String?   @map("connection_id") @db.Uuid
+  codeVerifierEnc String? @map("code_verifier_enc")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt   DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("oauth_states")
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  /// null = visível para todos os administradores do tenant
+  userId    String?   @map("user_id") @db.Uuid
+  kind      String
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@map("notifications")
+}

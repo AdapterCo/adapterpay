@@ -1,0 +1,25 @@
+{
+  "name": "@adapterpay/worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json && node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "healthcheck": "node dist/healthcheck.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@adapterpay/core": "workspace:*",
+    "@adapterpay/database": "workspace:*",
+    "@adapterpay/shared": "workspace:*",
+    "bullmq": "^5.41.0",
+    "ioredis": "^5.4.2"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2"
+  },
+  "files": [
+    "dist"
+  ]
+}

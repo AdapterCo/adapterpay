@@ -1,0 +1,27 @@
+{
+  "name": "@adapterpay/core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Núcleo de servidor compartilhado por API e worker: integração Mercado Pago, cobranças, billing, segurança.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@adapterpay/database": "workspace:*",
+    "@adapterpay/shared": "workspace:*",
+    "ioredis": "^5.4.2",
+    "pino": "^9.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2",
+    "vitest": "^3.2.4"
+  },
+  "files": [
+    "dist"
+  ]
+}

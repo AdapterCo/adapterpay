@@ -1,0 +1,40 @@
+{
+  "name": "adapterpay",
+  "private": true,
+  "description": "AdapterPay — Seu negócio recebe. Você acompanha. Uma plataforma da Adapter Co.",
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:packages": "pnpm --filter @adapterpay/shared build && pnpm --filter @adapterpay/database build && pnpm --filter @adapterpay/core build && pnpm --filter @adapterpay/ui build",
+    "build": "pnpm build:packages && pnpm --filter @adapterpay/api build && pnpm --filter @adapterpay/worker build && pnpm --filter @adapterpay/web build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "test:integration": "pnpm --filter @adapterpay/api test:integration",
+    "db:generate": "pnpm --filter @adapterpay/database generate",
+    "db:migrate:dev": "pnpm --filter @adapterpay/database migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @adapterpay/database migrate:deploy",
+    "db:seed": "pnpm --filter @adapterpay/database seed",
+    "dev:api": "pnpm --filter @adapterpay/api dev",
+    "dev:worker": "pnpm --filter @adapterpay/worker dev",
+    "dev:web": "pnpm --filter @adapterpay/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.7.2",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "@nestjs/core",
+      "msgpackr-extract",
+      "sharp",
+      "@swc/core"
+    ]
+  }
+}
