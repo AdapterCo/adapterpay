@@ -56,7 +56,7 @@ export class BillingService {
 
   private platformToken(): string {
     if (!this.platformTokenCache) {
-      this.platformTokenCache = resolvePlatformAccessToken(this.d.config.MP_PLATFORM_CREDENTIALS_REF);
+      this.platformTokenCache = resolvePlatformAccessToken(this.d.config);
     }
     return this.platformTokenCache;
   }

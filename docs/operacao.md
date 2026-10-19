@@ -5,8 +5,7 @@
 ```bash
 sudo mkdir -p /opt/adapterpay && sudo chown $USER /opt/adapterpay
 git clone <repo> /opt/adapterpay && cd /opt/adapterpay
-cp .env.example .env && chmod 600 .env     # preencha TODOS os CHANGE_ME
-install -m 600 /dev/null infra/secrets/mp_platform_access_token && printf '%s' 'APP_USR-…' > infra/secrets/mp_platform_access_token
+cp .env.example .env && chmod 600 .env     # preencha TODOS os CHANGE_ME (inclusive MP_PLATFORM_ACCESS_TOKEN)
 # Inspecione rede/entrypoint/certresolver do Traefik: infra/traefik/README.md
 infra/scripts/deploy.sh
 docker compose -f docker-compose.prod.yml run --rm --entrypoint node api dist/cli/create-superadmin.js ops@adapterco.com.br "Operação Adapter Co"

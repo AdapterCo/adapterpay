@@ -7,6 +7,7 @@ import {
   ConcurrencyLimitError,
   MpApiError,
   MpReconnectRequiredError,
+  PlatformCredentialsError,
   PlanLimitError,
   SubscriptionInactiveError,
   type Logger,
@@ -60,6 +61,9 @@ export class AppExceptionFilter implements ExceptionFilter {
     if (e instanceof BillingError) {
       const status = e.code === 'ALREADY_ACTIVE' ? 409 : e.code === 'PROVIDER_ERROR' ? 502 : 422;
       return out(status, e.code, e.message, e.details);
+    }
+    if (e instanceof PlatformCredentialsError) {
+      return out(503, 'PLATFORM_NOT_CONFIGURED', 'Pagamento do plano indisponível no momento: a cobrança da plataforma não está configurada. Avise o suporte da Adapter Co.');
     }
     if (e instanceof MpReconnectRequiredError) {
       return out(409, ERROR_CODES.MP_RECONNECT_REQUIRED, 'A conta Mercado Pago precisa ser reconectada.');

@@ -64,7 +64,6 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-    secrets: [mp_platform_access_token]
     networks: [backend, egress, traefik]
     labels:
       - "traefik.enable=true"
@@ -84,7 +83,6 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-    secrets: [mp_platform_access_token]
     networks: [backend, egress]
     # Escala horizontal segura (lease por Order): docker compose up -d --scale worker=2
     stop_grace_period: 30s
@@ -113,10 +111,6 @@ services:
       - "traefik.http.routers.adapterpay-http.rule=Host(`${APP_HOST}`)"
       - "traefik.http.routers.adapterpay-http.middlewares=adapterpay-https"
       - "traefik.http.routers.adapterpay-http.service=adapterpay-web"
-
-secrets:
-  mp_platform_access_token:
-    file: ./infra/secrets/mp_platform_access_token
 
 networks:
   backend:

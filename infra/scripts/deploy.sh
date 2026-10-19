@@ -12,7 +12,6 @@ STATE_DIR=".deploy"
 mkdir -p "$STATE_DIR"
 
 [ -f .env ] || { echo "ERRO: .env ausente (copie de .env.example e preencha)"; exit 1; }
-[ -f infra/secrets/mp_platform_access_token ] || { echo "ERRO: infra/secrets/mp_platform_access_token ausente"; exit 1; }
 set -a; . ./.env; set +a
 docker network inspect "$TRAEFIK_NETWORK" >/dev/null 2>&1 || { echo "ERRO: rede Traefik '$TRAEFIK_NETWORK' não existe (ver infra/traefik/README.md)"; exit 1; }
 

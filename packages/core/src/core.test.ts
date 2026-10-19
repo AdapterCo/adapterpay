@@ -156,7 +156,6 @@ describe('utilitários', () => {
       MP_CLIENT_ID: '1',
       MP_CLIENT_SECRET: '2',
       MP_OAUTH_REDIRECT_URI: 'http://localhost:3000/api/v1/integrations/mercado-pago/callback',
-      MP_PLATFORM_CREDENTIALS_REF: 'env:X',
     } as NodeJS.ProcessEnv;
     expect(() => loadConfig(base)).toThrow(/localhost|https/);
     const ok = loadConfig({

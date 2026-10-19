@@ -21,7 +21,10 @@ const schema = z
     MP_CLIENT_SECRET: z.string().min(1),
     MP_OAUTH_REDIRECT_URI: z.string().url(),
     MP_OAUTH_PKCE: bool,
-    MP_PLATFORM_CREDENTIALS_REF: z.string().min(1),
+    /** Token da conta MP da plataforma (assinaturas), direto no .env. */
+    MP_PLATFORM_ACCESS_TOKEN: z.string().optional(),
+    /** Alternativa legada: referência file:/caminho ou env:NOME. */
+    MP_PLATFORM_CREDENTIALS_REF: z.string().optional(),
     MP_API_BASE: z.string().url().default('https://api.mercadopago.com'),
     MP_AUTH_BASE: z.string().url().default('https://auth.mercadopago.com'),
     MP_HTTP_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
@@ -101,20 +104,36 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return cfg;
 }
 
+export class PlatformCredentialsError extends Error {
+  constructor(detail: string) {
+    super(`Token Mercado Pago da plataforma não configurado: ${detail}`);
+    this.name = 'PlatformCredentialsError';
+  }
+}
+
 /**
- * Resolve MP_PLATFORM_CREDENTIALS_REF sem nunca registrar o valor.
- * Formatos: "file:/run/secrets/x" (Docker secret) ou "env:NOME_DA_VARIAVEL".
+ * Token da conta Mercado Pago da PLATAFORMA (cobrança das assinaturas), sem nunca registrar o valor.
+ * Preferência: MP_PLATFORM_ACCESS_TOKEN no .env. Legado: MP_PLATFORM_CREDENTIALS_REF (file:/caminho ou env:NOME).
  */
-export function resolvePlatformAccessToken(ref: string, env: NodeJS.ProcessEnv = process.env): string {
+export function resolvePlatformAccessToken(config: { MP_PLATFORM_ACCESS_TOKEN?: string; MP_PLATFORM_CREDENTIALS_REF?: string }, env: NodeJS.ProcessEnv = process.env): string {
+  const direct = config.MP_PLATFORM_ACCESS_TOKEN?.trim();
+  if (direct && direct !== 'CHANGE_ME') return direct;
+  const ref = config.MP_PLATFORM_CREDENTIALS_REF?.trim();
+  if (!ref) throw new PlatformCredentialsError('defina MP_PLATFORM_ACCESS_TOKEN no .env');
   if (ref.startsWith('file:')) {
-    const value = readFileSync(ref.slice(5), 'utf8').trim();
-    if (!value) throw new Error('Credencial da plataforma vazia');
+    let value: string;
+    try {
+      value = readFileSync(ref.slice(5), 'utf8').trim();
+    } catch (err) {
+      throw new PlatformCredentialsError(`não foi possível ler o arquivo (${(err as NodeJS.ErrnoException).code ?? 'erro'})`);
+    }
+    if (!value) throw new PlatformCredentialsError('arquivo vazio');
     return value;
   }
   if (ref.startsWith('env:')) {
-    const value = env[ref.slice(4)];
-    if (!value) throw new Error('Credencial da plataforma ausente');
-    return value.trim();
+    const value = env[ref.slice(4)]?.trim();
+    if (!value) throw new PlatformCredentialsError(`variável ${ref.slice(4)} vazia`);
+    return value;
   }
-  throw new Error('MP_PLATFORM_CREDENTIALS_REF deve usar file: ou env:');
+  throw new PlatformCredentialsError('MP_PLATFORM_CREDENTIALS_REF deve usar file: ou env:');
 }

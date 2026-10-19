@@ -52,5 +52,5 @@ Registre respostas saneadas em `docs/contratos/` (sem tokens) e ajuste os tipos.
 
 ## Credenciais separadas
 
-- **Plataforma** (assinaturas): `MP_PLATFORM_CREDENTIALS_REF=file:/run/secrets/mp_platform_access_token`.
+- **Plataforma** (assinaturas): `MP_PLATFORM_ACCESS_TOKEN` no `.env` (Access Token de produção da Adapter Co.).
 - **Lojistas** (vendas): somente via OAuth, por conexão.
