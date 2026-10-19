@@ -79,9 +79,12 @@ export class AppExceptionFilter implements ExceptionFilter {
           'Retry-After': String(Math.ceil((e.retryAfterMs ?? 5000) / 1000)),
         });
       }
-      return out(502, ERROR_CODES.MP_UPSTREAM_ERROR, 'Falha na comunicação com o Mercado Pago.', {
+      const b = e.body as { message?: unknown } | null;
+      const providerMessage = b && typeof b.message === 'string' ? b.message.slice(0, 300) : null;
+      return out(502, ERROR_CODES.MP_UPSTREAM_ERROR, providerMessage ? `O Mercado Pago recusou a operação: ${providerMessage}` : 'Falha na comunicação com o Mercado Pago.', {
         providerStatus: e.status,
         providerCode: e.providerCode,
+        providerMessage,
       });
     }
     if (e instanceof HttpException) {

@@ -44,7 +44,18 @@ const emptyForm = {
   stateName: '',
   zipCode: '',
   reference: '',
+  coords: '',
 };
+
+/** Aceita "-23.5505, -46.6333" (formato copiado do Google Maps). */
+function parseCoords(v: string): { latitude: number; longitude: number } | null {
+  const m = /^s*(-?d{1,2}(?:.d+)?)s*[,; ]s*(-?d{1,3}(?:.d+)?)s*$/.exec(v);
+  if (!m) return null;
+  const latitude = Number(m[1]);
+  const longitude = Number(m[2]);
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  return { latitude, longitude };
+}
 
 export default function StoresPage() {
   const stores = useApi<Store[]>('/stores');
@@ -68,6 +79,12 @@ export default function StoresPage() {
     setError(null);
     try {
       const hasAddress = form.streetName && form.streetNumber && form.cityName && form.stateName;
+      const coords = parseCoords(form.coords);
+      if (form.createRemote && !coords) {
+        setError('Informe as coordenadas da loja no formato -23.5505, -46.6333 (copie do Google Maps).');
+        setSaving(false);
+        return;
+      }
       await api('/stores', {
         method: 'POST',
         body: {
@@ -84,6 +101,7 @@ export default function StoresPage() {
                 stateName: form.stateName,
                 zipCode: form.zipCode || undefined,
                 reference: form.reference || undefined,
+                ...(coords ?? {}),
               }
             : undefined,
         },
@@ -251,6 +269,10 @@ export default function StoresPage() {
               <Field label="Estado">{(p) => <Input {...p} required value={form.stateName} onChange={(e) => setForm({ ...form, stateName: e.target.value })} />}</Field>
               <Field label="CEP">{(p) => <Input {...p} value={form.zipCode} onChange={(e) => setForm({ ...form, zipCode: e.target.value })} />}</Field>
               <Field label="Referência">{(p) => <Input {...p} value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />}</Field>
+              <Field label="Coordenadas (latitude, longitude)" className="sm:col-span-2" hint="No Google Maps, clique com o botão direito no local da loja e clique nos números para copiar. Ex.: -23.5505, -46.6333">
+                {(p) => <Input {...p} required inputMode="decimal" placeholder="-23.5505, -46.6333" value={form.coords} onChange={(e) => setForm({ ...form, coords: e.target.value })} />}
+              </Field>
+              <p className="text-xs text-slate-500 sm:col-span-2">Escreva estado e cidade por extenso e com acento, como no Mercado Pago (ex.: São Paulo / São Paulo).</p>
             </>
           )}
           <Checkbox className="sm:col-span-2" checked={form.activate} onChange={(e) => setForm({ ...form, activate: e.target.checked })} label="Ativar agora (respeitando o limite do plano)" />

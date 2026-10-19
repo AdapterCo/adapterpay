@@ -63,6 +63,9 @@ export class StoresService {
     if (input.createRemote && (!input.mpConnectionId || !input.address)) {
       throw Errors.validation('Para criar a loja no Mercado Pago informe a conexão e o endereço completo');
     }
+    if (input.createRemote && (input.address?.latitude === undefined || input.address?.longitude === undefined)) {
+      throw Errors.validation('O Mercado Pago exige as coordenadas (latitude e longitude) da loja');
+    }
     const wantsActive = input.activate && !input.createRemote;
 
     const store = await this.deps.prisma.$transaction(async (tx) => {
