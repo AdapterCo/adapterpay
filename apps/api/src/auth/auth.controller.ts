@@ -10,7 +10,6 @@ import {
   registerSchema,
   resetPasswordSchema,
   switchTenantSchema,
-  verifyEmailSchema,
 } from '@adapterpay/shared';
 import { z } from 'zod';
 import { CurrentAuth, Meta, type AuthContext, type RequestMeta } from '../common/request';
@@ -41,22 +40,15 @@ export class AuthController {
   @Public()
   @Post('register')
   @ApiZodBody(registerSchema)
-  async register(@ZBody(registerSchema) body: z.infer<typeof registerSchema>, @Meta() meta: RequestMeta) {
-    return this.auth.register(body, meta);
-  }
-
-  @Public()
-  @Post('verify-email')
-  @HttpCode(204)
-  async verifyEmail(@ZBody(verifyEmailSchema) body: z.infer<typeof verifyEmailSchema>): Promise<void> {
-    await this.auth.verifyEmail(body.token);
-  }
-
-  @Public()
-  @Post('resend-verification')
-  @HttpCode(204)
-  async resend(@ZBody(forgotPasswordSchema) body: z.infer<typeof forgotPasswordSchema>, @Meta() meta: RequestMeta): Promise<void> {
-    await this.auth.resendVerification(body.email, meta);
+  async register(
+    @ZBody(registerSchema) body: z.infer<typeof registerSchema>,
+    @Meta() meta: RequestMeta,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ ok: true; planId: string }> {
+    const { token } = await this.auth.register(body, meta);
+    setSessionCookie(res, this.deps.config, token);
+    setCsrfCookie(res, this.deps.config, randomToken(24));
+    return { ok: true, planId: body.planId };
   }
 
   @Public()

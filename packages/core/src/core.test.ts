@@ -164,7 +164,6 @@ describe('utilitários', () => {
       APP_URL: 'https://adapterpay.adapterco.com.br',
       API_PUBLIC_URL: 'https://adapterpay.adapterco.com.br/api/v1',
       MP_OAUTH_REDIRECT_URI: 'https://adapterpay.adapterco.com.br/api/v1/integrations/mercado-pago/callback',
-      SMTP_HOST: 'smtp.example.com',
     });
     expect(ok.chargeExpirationIso).toBe('PT3M');
   });

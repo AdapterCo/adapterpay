@@ -21,7 +21,7 @@ interface Member {
   storeIds: 'ALL' | string[];
 }
 
-const STATUS = { ACTIVE: ['Ativo', 'success'], INVITED: ['Convidado', 'info'], DISABLED: ['Desativado', 'neutral'] } as const;
+const STATUS = { ACTIVE: ['Ativo', 'success'], INVITED: ['Ativo', 'success'], DISABLED: ['Desativado', 'neutral'] } as const;
 
 export default function UsersPage() {
   const { me } = useSession();
@@ -30,7 +30,7 @@ export default function UsersPage() {
   const stores = useApi<Array<{ id: string; name: string }>>('/stores');
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Member | null>(null);
-  const [form, setForm] = useState<{ email: string; name: string; role: TenantRole; storeIds: string[] }>({ email: '', name: '', role: 'VENDEDOR', storeIds: [] });
+  const [form, setForm] = useState<{ email: string; name: string; role: TenantRole; password: string; storeIds: string[] }>({ email: '', name: '', role: 'VENDEDOR', password: '', storeIds: [] });
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -40,10 +40,10 @@ export default function UsersPage() {
     setSaving(true);
     setError(null);
     try {
-      await critical(() => api('/users/invite', { method: 'POST', body: form }));
+      await critical(() => api('/users', { method: 'POST', body: form }));
       setOpen(false);
-      setMsg(`Convite enviado para ${form.email}.`);
-      setForm({ email: '', name: '', role: 'VENDEDOR', storeIds: [] });
+      setMsg(`Usuário ${form.email} criado. Passe a senha inicial para ele entrar.`);
+      setForm({ email: '', name: '', role: 'VENDEDOR', password: '', storeIds: [] });
       await users.reload();
     } catch (err) {
       setError(errorMessage(err));
@@ -52,7 +52,7 @@ export default function UsersPage() {
     }
   };
 
-  const save = async (patch: { role?: TenantRole; status?: 'ACTIVE' | 'DISABLED'; storeIds?: string[] }, userId: string) => {
+  const save = async (patch: { role?: TenantRole; status?: 'ACTIVE' | 'DISABLED'; storeIds?: string[]; password?: string }, userId: string) => {
     setSaving(true);
     setError(null);
     try {
@@ -81,7 +81,7 @@ export default function UsersPage() {
 
   return (
     <>
-      <PageHeader title="Usuários e permissões" description="Convide administradores, vendedores e contadores. Desativar não apaga o histórico." actions={<Button onClick={() => setOpen(true)}>Convidar usuário</Button>} />
+      <PageHeader title="Usuários e permissões" description="Cadastre administradores, vendedores e contadores com uma senha inicial. Desativar não apaga o histórico." actions={<Button onClick={() => setOpen(true)}>Adicionar usuário</Button>} />
       {msg && <Alert tone="success" className="mb-4">{msg}</Alert>}
       {error && <Alert tone="danger" className="mb-4">{error}</Alert>}
       <Card>
@@ -116,11 +116,12 @@ export default function UsersPage() {
         )}
       </Card>
 
-      <Dialog open={open} onOpenChange={setOpen} title="Convidar usuário" description="Convites pendentes ocupam uma vaga do plano.">
+      <Dialog open={open} onOpenChange={setOpen} title="Adicionar usuário" description="O usuário entra com o email e a senha inicial definidos aqui.">
         <form onSubmit={invite} className="flex flex-col gap-3">
           {error && <Alert tone="danger">{error}</Alert>}
           <Field label="Nome">{(p) => <Input {...p} required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />}</Field>
           <Field label="Email">{(p) => <Input {...p} required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />}</Field>
+          <Field label="Senha inicial" hint="Mínimo de 10 caracteres, com letras e números.">{(p) => <Input {...p} required type="text" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />}</Field>
           <Field label="Papel">
             {(p) => (
               <Select {...p} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as TenantRole })}>
@@ -134,7 +135,7 @@ export default function UsersPage() {
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button type="submit" loading={saving}>Enviar convite</Button>
+            <Button type="submit" loading={saving}>Criar usuário</Button>
           </div>
         </form>
       </Dialog>
@@ -156,11 +157,12 @@ function EditForm({
 }: {
   member: Member;
   saving: boolean;
-  onSave: (p: { role: TenantRole; storeIds: string[] }) => void;
+  onSave: (p: { role: TenantRole; storeIds: string[]; password?: string }) => void;
   StorePicker: (p: { value: string[]; onChange: (v: string[]) => void }) => React.ReactNode;
 }) {
   const [role, setRole] = useState<TenantRole>(member.role);
   const [storeIds, setStoreIds] = useState<string[]>(member.storeIds === 'ALL' ? [] : member.storeIds);
+  const [password, setPassword] = useState('');
   return (
     <div className="flex flex-col gap-3">
       <Field label="Papel">
@@ -171,8 +173,11 @@ function EditForm({
         )}
       </Field>
       {role !== 'ADMIN' && <StorePicker value={storeIds} onChange={setStoreIds} />}
+      <Field label="Nova senha (opcional)" hint="Preencha só para redefinir a senha deste usuário.">
+        {(p) => <Input {...p} type="text" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />}
+      </Field>
       <div className="flex justify-end">
-        <Button loading={saving} onClick={() => onSave({ role, storeIds })}>Salvar</Button>
+        <Button loading={saving} onClick={() => onSave({ role, storeIds, ...(password ? { password } : {}) })}>Salvar</Button>
       </div>
     </div>
   );

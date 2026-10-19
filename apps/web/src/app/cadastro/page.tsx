@@ -1,12 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { formatBRL, registerSchema } from '@adapterpay/shared';
 import { Alert, Button, Checkbox, Field, Input, Select } from '@adapterpay/ui';
 import { AuthShell } from '@/components/auth-shell';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, resetCsrf } from '@/lib/api';
 
 interface Plan {
   id: string;
@@ -16,6 +16,7 @@ interface Plan {
 
 function RegisterForm() {
   const params = useSearchParams();
+  const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [form, setForm] = useState({
     planId: params.get('plano') ?? 'inicial',
@@ -29,7 +30,6 @@ function RegisterForm() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -51,27 +51,15 @@ function RegisterForm() {
     setErrors({});
     setLoading(true);
     try {
-      const res = await api<{ email: string }>('/auth/register', { method: 'POST', body: parsed.data });
-      setDone(res.email);
+      // Conta criada já ativa e logada: segue direto para o pagamento do plano.
+      const res = await api<{ ok: true; planId: string }>('/auth/register', { method: 'POST', body: parsed.data });
+      resetCsrf();
+      router.replace(`/assinar/${encodeURIComponent(res.planId)}`);
     } catch (err) {
       setError(errorMessage(err));
-    } finally {
       setLoading(false);
     }
   };
-
-  if (done) {
-    return (
-      <AuthShell title="Confirme seu email">
-        <Alert tone="success" title="Cadastro recebido">
-          Enviamos um link de confirmação para <strong>{done}</strong>. Depois de confirmar, faça login e conclua o pagamento do plano para liberar o uso.
-        </Alert>
-        <Link href="/login" className="mt-6 block">
-          <Button className="w-full" variant="secondary">Ir para o login</Button>
-        </Link>
-      </AuthShell>
-    );
-  }
 
   return (
     <AuthShell

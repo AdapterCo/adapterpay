@@ -23,9 +23,8 @@ export class MailerService {
 
   async send(to: string, subject: string, text: string): Promise<void> {
     if (!this.transport) {
-      if (this.deps.config.NODE_ENV === 'production') throw new Error('SMTP não configurado');
-      // Desenvolvimento local sem SMTP: o link é exibido no log para teste manual.
-      this.deps.logger.warn({ to, subject, text }, 'SMTP não configurado (desenvolvimento): email não enviado');
+      // SMTP é opcional: sem ele, nenhum email é enviado (somente a recuperação de senha usa email).
+      this.deps.logger.warn({ subject }, 'SMTP não configurado: email não enviado');
       return;
     }
     await this.transport.sendMail({

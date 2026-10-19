@@ -29,7 +29,7 @@ export default function ForgotPasswordPage() {
   return (
     <AuthShell title="Recuperar senha" subtitle="Enviaremos um link de redefinição para o seu email.">
       {sent ? (
-        <Alert tone="success">Se houver uma conta com esse email, você receberá o link em instantes. O link vale por 1 hora.</Alert>
+        <Alert tone="success">Se houver uma conta com esse email e o envio de emails estiver ativo, você receberá o link (válido por 1 hora). Se não receber, peça ao administrador da sua empresa para redefinir sua senha em Usuários.</Alert>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">
           {error && <Alert tone="danger">{error}</Alert>}

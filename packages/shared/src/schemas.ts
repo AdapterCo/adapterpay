@@ -48,12 +48,6 @@ export type LoginInput = z.infer<typeof loginSchema>;
 
 export const forgotPasswordSchema = z.object({ email });
 export const resetPasswordSchema = z.object({ token: z.string().min(20).max(200), password: passwordSchema });
-export const verifyEmailSchema = z.object({ token: z.string().min(20).max(200) });
-export const acceptInviteSchema = z.object({
-  token: z.string().min(20).max(200),
-  name: z.string().trim().min(2).max(120),
-  password: passwordSchema,
-});
 
 export const mfaVerifySchema = z.object({ code: z.string().trim().regex(/^\d{6}$/, 'Código de 6 dígitos') });
 export const mfaChallengeSchema = z.object({
@@ -187,10 +181,12 @@ export const reportQuerySchema = z.object({
   format: z.enum(['csv', 'xlsx']).optional(),
 });
 
-export const inviteUserSchema = z.object({
+/** Administrador cria o usuário com senha inicial (sem convite por email). */
+export const createUserSchema = z.object({
   email,
   name: z.string().trim().min(2).max(120),
   role: z.enum(TENANT_ROLES),
+  password: passwordSchema,
   storeIds: z.array(uuid).max(100).default([]),
 });
 
@@ -198,6 +194,8 @@ export const updateUserSchema = z.object({
   role: z.enum(TENANT_ROLES).optional(),
   status: z.enum(['ACTIVE', 'DISABLED']).optional(),
   storeIds: z.array(uuid).max(100).optional(),
+  /** Nova senha definida pelo administrador. */
+  password: passwordSchema.optional(),
 });
 
 export const tenantSettingsSchema = z.object({

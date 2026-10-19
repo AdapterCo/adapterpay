@@ -60,7 +60,8 @@ export class AuthService {
 
   // ------------------------------------------------------------------ cadastro
 
-  async register(input: RegisterInput, meta: RequestMeta): Promise<{ email: string }> {
+  /** Cadastro sem verificação de email: conta ativa e sessão criada na hora (segue para o pagamento do plano). */
+  async register(input: RegisterInput, meta: RequestMeta): Promise<{ token: string; user: User }> {
     await this.limiter.enforce(`register:${meta.ip}`, 5, 3600);
     const plan = await this.deps.prisma.plan.findFirst({ where: { id: input.planId, active: true } });
     if (!plan) throw Errors.validation('Plano indisponível');
@@ -81,7 +82,7 @@ export class AuthService {
           },
         });
         const u = await tx.user.create({
-          data: { email: input.email, name: input.adminName, passwordHash, status: 'PENDING_VERIFICATION' },
+          data: { email: input.email, name: input.adminName, passwordHash, status: 'ACTIVE', emailVerifiedAt: new Date() },
         });
         await tx.tenantMembership.create({
           data: { tenantId: tenant.id, userId: u.id, role: 'ADMIN', status: 'ACTIVE', isOwner: true },
@@ -107,30 +108,8 @@ export class AuthService {
       throw err;
     }
 
-    const token = await this.issueEmailToken(user.id, 'VERIFY_EMAIL', 48 * 3600 * 1000);
-    await this.mailer.send(
-      user.email,
-      'Confirme seu email',
-      `Olá, ${user.name}!\n\nConfirme seu email para continuar a contratação do AdapterPay:\n${this.link(`/verificar-email?token=${token}`)}\n\nO link expira em 48 horas.`,
-    );
-    return { email: user.email };
-  }
-
-  async verifyEmail(token: string): Promise<void> {
-    const row = await this.consumeEmailToken(token, 'VERIFY_EMAIL');
-    await this.deps.prisma.user.updateMany({
-      where: { id: row.userId, status: 'PENDING_VERIFICATION' },
-      data: { status: 'ACTIVE', emailVerifiedAt: new Date() },
-    });
-  }
-
-  async resendVerification(email: string, meta: RequestMeta): Promise<void> {
-    await this.limiter.enforce(`resend:${meta.ip}`, 5, 3600);
-    await this.limiter.enforce(`resend-email:${sha256Hex(email)}`, 3, 3600);
-    const user = await this.deps.prisma.user.findUnique({ where: { email } });
-    if (!user || user.status !== 'PENDING_VERIFICATION') return; // resposta idêntica: sem enumeração
-    const token = await this.issueEmailToken(user.id, 'VERIFY_EMAIL', 48 * 3600 * 1000);
-    await this.mailer.send(user.email, 'Confirme seu email', `Confirme seu email:\n${this.link(`/verificar-email?token=${token}`)}`);
+    const { token } = await this.sessions.create(user, meta, false);
+    return { token, user };
   }
 
   // ------------------------------------------------------------------ login
@@ -155,10 +134,8 @@ export class AuthService {
       }
       throw invalid;
     }
-    if (user.status === 'PENDING_VERIFICATION') {
-      throw new AppError(403, ERROR_CODES.EMAIL_NOT_VERIFIED, 'Confirme seu email antes de entrar');
-    }
-    if (user.status !== 'ACTIVE') throw invalid;
+    // Sem verificação de email: contas antigas pendentes são ativadas no primeiro login válido.
+    if (user.status === 'DISABLED') throw invalid;
 
     let mfaVerified = false;
     if (user.mfaEnabledAt) {
@@ -169,7 +146,7 @@ export class AuthService {
 
     await this.deps.prisma.user.update({
       where: { id: user.id },
-      data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date() },
+      data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date(), status: 'ACTIVE' },
     });
     const { token, session } = await this.sessions.create(user, meta, mfaVerified);
     await writeAudit(this.deps.prisma, {

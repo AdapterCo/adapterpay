@@ -1,18 +1,12 @@
 import { Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { inviteUserSchema, passwordSchema, updateUserSchema } from '@adapterpay/shared';
-import { z } from 'zod';
-import { Critical, Public, RequirePermission } from '../auth/decorators';
+import { createUserSchema, updateUserSchema } from '@adapterpay/shared';
+import type { z } from 'zod';
+import { Critical, RequirePermission } from '../auth/decorators';
 import { RateLimit } from '../common/rate-limit';
 import { CurrentAuth, Meta, type AuthContext, type RequestMeta } from '../common/request';
 import { ApiZodBody, ZBody } from '../common/zod';
 import { UsersService } from './users.service';
-
-const acceptSchema = z.object({
-  token: z.string().min(20).max(200),
-  name: z.string().trim().min(2).max(120).optional(),
-  password: passwordSchema.optional(),
-});
 
 @ApiTags('users')
 @Controller('users')
@@ -25,20 +19,14 @@ export class UsersController {
     return this.users.list(auth);
   }
 
-  @Post('invite')
+  /** Cria o usuário já ativo, com senha inicial definida pelo administrador. */
+  @Post()
   @Critical()
   @RequirePermission('users:manage')
-  @RateLimit({ key: 'invite', limit: 30, windowSec: 3600, by: 'user' })
-  @ApiZodBody(inviteUserSchema)
-  invite(@CurrentAuth() auth: AuthContext, @ZBody(inviteUserSchema) body: z.infer<typeof inviteUserSchema>, @Meta() meta: RequestMeta) {
-    return this.users.invite(auth, body, meta);
-  }
-
-  @Public()
-  @Post('accept-invite')
-  @RateLimit({ key: 'accept-invite', limit: 10, windowSec: 600 })
-  accept(@ZBody(acceptSchema) body: z.infer<typeof acceptSchema>, @Meta() meta: RequestMeta) {
-    return this.users.acceptInvite(body, meta);
+  @RateLimit({ key: 'user-create', limit: 30, windowSec: 3600, by: 'user' })
+  @ApiZodBody(createUserSchema)
+  create(@CurrentAuth() auth: AuthContext, @ZBody(createUserSchema) body: z.infer<typeof createUserSchema>, @Meta() meta: RequestMeta) {
+    return this.users.create(auth, body, meta);
   }
 
   @Patch(':id')

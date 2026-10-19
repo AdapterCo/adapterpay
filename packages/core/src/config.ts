@@ -60,9 +60,6 @@ const schema = z
     if (!env.MP_OAUTH_REDIRECT_URI.startsWith(env.APP_URL)) {
       ctx.addIssue({ code: 'custom', path: ['MP_OAUTH_REDIRECT_URI'], message: 'deve pertencer ao APP_URL' });
     }
-    if (!env.SMTP_HOST || env.SMTP_HOST === 'CHANGE_ME') {
-      ctx.addIssue({ code: 'custom', path: ['SMTP_HOST'], message: 'SMTP é obrigatório em produção' });
-    }
     for (const key of ['SESSION_SECRET', 'ENCRYPTION_KEY', 'MP_CLIENT_ID', 'MP_CLIENT_SECRET'] as const) {
       if (env[key].includes('CHANGE_ME')) ctx.addIssue({ code: 'custom', path: [key], message: 'valor de exemplo' });
     }

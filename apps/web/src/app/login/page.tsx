@@ -20,14 +20,12 @@ function LoginForm() {
   const [mfaCode, setMfaCode] = useState('');
   const [needMfa, setNeedMfa] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [unverified, setUnverified] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setUnverified(false);
     try {
       const res = await api<{ ok: true; mfaEnrollmentRequired: boolean }>('/auth/login', {
         method: 'POST',
@@ -43,8 +41,6 @@ function LoginForm() {
       if (err instanceof ApiError && err.code === 'MFA_REQUIRED') {
         setNeedMfa(true);
         if (mfaCode) setError(err.message);
-      } else if (err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED') {
-        setUnverified(true);
       } else {
         setError(errorMessage(err));
       }
@@ -53,24 +49,11 @@ function LoginForm() {
     }
   };
 
-  const resend = async () => {
-    await api('/auth/resend-verification', { method: 'POST', body: { email } }).catch(() => undefined);
-    setError('Se o email estiver pendente de confirmação, enviamos um novo link.');
-    setUnverified(false);
-  };
-
   return (
     <AuthShell title="Entrar no AdapterPay" subtitle="Acesse o painel da sua empresa.">
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-        {params.get('verificado') && <Alert tone="success">Email confirmado. Faça login para continuar.</Alert>}
         {params.get('senha') && <Alert tone="success">Senha redefinida. Entre com a nova senha.</Alert>}
         {error && <Alert tone="danger">{error}</Alert>}
-        {unverified && (
-          <Alert tone="warning" title="Confirme seu email">
-            Enviamos um link de confirmação no cadastro.{' '}
-            <button type="button" onClick={resend} className="font-medium underline">Reenviar link</button>
-          </Alert>
-        )}
         <Field label="Email">
           {(p) => <Input {...p} type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />}
         </Field>
