@@ -3,25 +3,26 @@ import Link from 'next/link';
 export const SLOGAN = 'Seu negócio recebe. Você acompanha.';
 export const SIGNATURE = 'Uma plataforma da Adapter Co.';
 
+/* eslint-disable @next/next/no-img-element */
+
+/** Símbolo (A + módulos de QR). */
 export function LogoMark({ className = 'h-8 w-8' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
-      <rect width="32" height="32" rx="8" fill="#0e8468" />
-      <path d="M9 22.5 15 9h2l6 13.5h-3.1l-1.3-3.1h-5.2l-1.3 3.1H9Zm5.4-5.7h3.2L16 12.9l-1.6 3.9Z" fill="#fff" />
-      <circle cx="24.5" cy="9.5" r="2.5" fill="#aeead4" />
-    </svg>
-  );
+  return <img src="/brand/adapterpay-mark.svg" alt="" aria-hidden="true" className={`${className} object-contain`} />;
 }
 
+/** Símbolo + wordmark na horizontal, para cabeçalhos. */
 export function Logo({ href = '/', className = '' }: { href?: string; className?: string }) {
   return (
     <Link href={href} className={`inline-flex items-center gap-2 ${className}`} aria-label="AdapterPay — início">
-      <LogoMark />
-      <span className="text-lg font-bold tracking-tight text-ink">
-        Adapter<span className="text-brand-600">Pay</span>
-      </span>
+      <LogoMark className="h-8 w-8" />
+      <img src="/brand/adapterpay-wordmark.svg" alt="AdapterPay" className="h-5 w-auto" />
     </Link>
   );
+}
+
+/** Lockup vertical original (símbolo sobre wordmark), como na placa. */
+export function LogoLockup({ className = 'h-24' }: { className?: string }) {
+  return <img src="/brand/adapterpay-logo.svg" alt="AdapterPay" className={`${className} w-auto`} />;
 }
 
 export function BrandSignature({ className = '' }: { className?: string }) {

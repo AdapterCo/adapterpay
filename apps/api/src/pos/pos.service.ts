@@ -398,10 +398,21 @@ export class PosService {
       QRCode.toString(url, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }),
       QRCode.toDataURL(url, { margin: 2, width: 1024, errorCorrectionLevel: 'M' }),
     ]);
+    // QR principal da placa: o BR Code estático do POS (qr_response.qr_code). O Mercado Pago aplica
+    // o valor da Order ativa no momento do pagamento; a confirmação continua sendo feita pelo polling.
+    const brCodeValid = !!pos.qrCode && validateBrCode(pos.qrCode).valid;
+    const brCode = brCodeValid
+      ? {
+          value: pos.qrCode!,
+          svg: await QRCode.toString(pos.qrCode!, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }),
+          pngDataUrl: await QRCode.toDataURL(pos.qrCode!, { margin: 2, width: 1024, errorCorrectionLevel: 'M' }),
+        }
+      : null;
     return {
       url,
       svg,
       pngDataUrl: png,
+      brCode,
       // Registro NDEF URI para gravação em tag NFC (sem app próprio).
       nfc: { recordType: 'U', uri: url },
       storeName: pos.store?.name ?? null,

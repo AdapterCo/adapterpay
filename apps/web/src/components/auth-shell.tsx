@@ -3,7 +3,7 @@ import { BrandSignature, Logo, SLOGAN } from './brand';
 
 export function AuthShell({ title, subtitle, children, wide = false }: { title: string; subtitle?: ReactNode; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="flex min-h-dvh flex-col bg-gradient-to-b from-brand-50 to-slate-50">
+    <div className="flex min-h-dvh flex-col bg-paper">
       <header className="px-4 py-5">
         <div className="mx-auto max-w-6xl">
           <Logo />

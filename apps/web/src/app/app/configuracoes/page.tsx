@@ -126,8 +126,8 @@ export default function SettingsPage() {
             <Field label="Cor da marca">
               {(p) => (
                 <div className="flex items-center gap-2">
-                  <input type="color" aria-label="Seletor de cor" value={form.brandColor ?? '#0e8468'} onChange={(e) => setForm({ ...form, brandColor: e.target.value })} className="h-10 w-12 rounded border border-slate-300" />
-                  <Input {...p} value={form.brandColor ?? ''} placeholder="#0e8468" onChange={(e) => setForm({ ...form, brandColor: e.target.value })} />
+                  <input type="color" aria-label="Seletor de cor" value={form.brandColor ?? '#005efe'} onChange={(e) => setForm({ ...form, brandColor: e.target.value })} className="h-10 w-12 rounded border border-slate-300" />
+                  <Input {...p} value={form.brandColor ?? ''} placeholder="#005efe" onChange={(e) => setForm({ ...form, brandColor: e.target.value })} />
                 </div>
               )}
             </Field>

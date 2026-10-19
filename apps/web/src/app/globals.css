@@ -1,19 +1,27 @@
 @import 'tailwindcss';
 @source '../../../../packages/ui/src';
 
+/*
+ * Identidade AdapterPay — cores extraídas da logo:
+ * azul de ação #005EFE, marinho #091F48 (tinta), papel frio #F3F6FC, linha #D5DDEC.
+ * Verde fica restrito ao estado "pago".
+ */
 @theme {
-  --color-brand-50: #eefbf6;
-  --color-brand-100: #d5f5e8;
-  --color-brand-200: #aeead4;
-  --color-brand-300: #78d8b9;
-  --color-brand-400: #40bf99;
-  --color-brand-500: #1aa47f;
-  --color-brand-600: #0e8468;
-  --color-brand-700: #0c6a55;
-  --color-brand-800: #0d5445;
-  --color-brand-900: #0c453a;
-  --color-ink: #0f1d2e;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe7ff;
+  --color-brand-200: #b8cfff;
+  --color-brand-300: #84acff;
+  --color-brand-400: #4683ff;
+  --color-brand-500: #1a6bff;
+  --color-brand-600: #005efe;
+  --color-brand-700: #004bd0;
+  --color-brand-800: #0a3a96;
+  --color-brand-900: #091f48;
+  --color-ink: #091f48;
+  --color-paper: #f3f6fc;
+  --color-line: #d5ddec;
+  --color-paid: #0f8a5f;
+  --font-sans: var(--font-sora), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
@@ -22,11 +30,16 @@ html {
 }
 
 body {
-  @apply bg-slate-50 text-ink antialiased;
+  @apply bg-paper text-ink antialiased;
 }
 
 :focus-visible {
   outline-color: var(--color-brand-600);
+}
+
+/* Moldura de recorte da placa (mesmo traço tracejado do modelo impresso). */
+.plate-cut {
+  border: 1.5px dashed #b9c3d6;
 }
 
 @media print {

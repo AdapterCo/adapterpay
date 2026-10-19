@@ -26,11 +26,10 @@ export default function LandingPage() {
     <>
       <MarketingHeader />
       <main id="conteudo">
-        <section className="bg-gradient-to-b from-brand-50 to-slate-50">
-          <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-16 md:grid-cols-2 md:py-24">
+        <section>
+          <div className="mx-auto max-w-6xl px-4 py-16 md:py-24">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-brand-700">Pix presencial com QR Code e NFC</p>
-              <h1 className="mt-3 text-4xl font-bold tracking-tight text-ink sm:text-5xl">{SLOGAN}</h1>
+              <h1 className="text-4xl font-semibold tracking-tight text-ink sm:text-6xl sm:leading-[1.05]">{SLOGAN}</h1>
               <p className="mt-4 max-w-xl text-lg text-slate-600">
                 Gere cobranças em segundos, mostre o Pix na placa do caixa e acompanhe a confirmação no painel. O dinheiro vai direto para a sua conta Mercado Pago.
               </p>
@@ -43,17 +42,6 @@ export default function LandingPage() {
                 </Link>
               </div>
               <p className="mt-6 text-sm text-slate-500">{SIGNATURE}</p>
-            </div>
-            <div className="mx-auto w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-6 shadow-lg" aria-hidden="true">
-              <p className="text-sm text-slate-500">Padaria Central · Caixa 1</p>
-              <p className="mt-2 text-4xl font-bold tabular-nums">R$ 27,50</p>
-              <div className="mx-auto mt-5 grid h-44 w-44 grid-cols-8 gap-0.5 rounded-lg bg-white p-2 ring-1 ring-slate-200">
-                {Array.from({ length: 64 }).map((_, i) => (
-                  <span key={i} className={(i * 7 + (i >> 3)) % 3 === 0 ? 'bg-ink' : 'bg-transparent'} />
-                ))}
-              </div>
-              <div className="mt-5 h-11 rounded-lg bg-brand-600" />
-              <p className="mt-3 text-center text-xs text-slate-500">Expira em 02:41</p>
             </div>
           </div>
         </section>
