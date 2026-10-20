@@ -35,6 +35,12 @@
       "msgpackr-extract",
       "sharp",
       "@swc/core"
-    ]
+    ],
+    "overrides": {
+      "postcss": "^8.5.31",
+      "exceljs>uuid": "^11.1.1",
+      "@prisma/config>deepmerge-ts": "^8.0.2",
+      "@nestjs/swagger>js-yaml": "^5.5.0"
+    }
   }
 }

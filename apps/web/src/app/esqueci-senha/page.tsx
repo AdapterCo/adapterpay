@@ -8,7 +8,7 @@ import { api, errorMessage } from '@/lib/api';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<null | { emailEnabled: boolean }>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -17,8 +17,7 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError(null);
     try {
-      await api('/auth/forgot-password', { method: 'POST', body: { email } });
-      setSent(true);
+      setSent(await api<{ emailEnabled: boolean }>('/auth/forgot-password', { method: 'POST', body: { email } }));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -28,8 +27,12 @@ export default function ForgotPasswordPage() {
 
   return (
     <AuthShell title="Recuperar senha" subtitle="Enviaremos um link de redefinição para o seu email.">
-      {sent ? (
-        <Alert tone="success">Se houver uma conta com esse email e o envio de emails estiver ativo, você receberá o link (válido por 1 hora). Se não receber, peça ao administrador da sua empresa para redefinir sua senha em Usuários.</Alert>
+      {sent?.emailEnabled ? (
+        <Alert tone="success">Se houver uma conta com esse email, você receberá o link em instantes (válido por 1 hora). Confira também a caixa de spam.</Alert>
+      ) : sent ? (
+        <Alert tone="warning" title="Envio de email indisponível">
+          Peça ao administrador da sua empresa para redefinir sua senha em Usuários. Se você é o administrador principal, fale com o suporte da Adapter Co.
+        </Alert>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">
           {error && <Alert tone="danger">{error}</Alert>}

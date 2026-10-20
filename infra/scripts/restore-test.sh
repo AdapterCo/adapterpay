@@ -4,7 +4,8 @@
 # Uso: infra/scripts/restore-test.sh [arquivo.dump|.dump.gpg]   Cron sugerido: semanal.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-FILE="${1:-$(ls -1t backups/adapterpay-*.dump backups/adapterpay-*.dump.gpg 2>/dev/null | head -n1)}"
+# "|| true": sem .gpg (ou sem .dump) o ls falha e, com pipefail, o script sairia em silêncio.
+FILE="${1:-$(ls -1t backups/adapterpay-*.dump backups/adapterpay-*.dump.gpg 2>/dev/null | head -n1 || true)}"
 [ -n "$FILE" ] || { echo "ERRO: nenhum backup encontrado"; exit 1; }
 NAME="adapterpay-restore-test-$$"
 trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT

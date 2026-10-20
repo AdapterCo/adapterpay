@@ -57,12 +57,32 @@ export class EventsController {
       subscriber.next({ type: 'ready', data: { ok: true } });
       const heartbeat = setInterval(() => subscriber.next({ type: 'ping', data: String(Date.now()) }), 15_000);
       const timeout = setTimeout(() => subscriber.complete(), MAX_STREAM_MS);
+      // Sessão revogada/expirada, usuário desativado ou removido da empresa: encerra o stream em até 1 min.
+      const recheck = setInterval(() => {
+        void this.stillAuthorized(auth, tenantId).then((ok) => {
+          if (!ok) subscriber.complete();
+        }).catch(() => subscriber.complete());
+      }, 60_000);
       return () => {
+        clearInterval(recheck);
         clearInterval(heartbeat);
         clearTimeout(timeout);
         unsubscribe();
         release();
       };
     });
+  }
+
+  private async stillAuthorized(auth: AuthContext, tenantId: string): Promise<boolean> {
+    const session = await this.deps.prisma.session.findUnique({
+      where: { id: auth.sessionId },
+      select: { revokedAt: true, expiresAt: true, user: { select: { status: true } } },
+    });
+    if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now() || session.user.status !== 'ACTIVE') return false;
+    const membership = await this.deps.prisma.tenantMembership.findUnique({
+      where: { tenantId_userId: { tenantId, userId: auth.userId } },
+      select: { status: true },
+    });
+    return membership?.status === 'ACTIVE';
   }
 }

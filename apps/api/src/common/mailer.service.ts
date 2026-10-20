@@ -21,6 +21,11 @@ export class MailerService {
         : null;
   }
 
+  /** true quando há SMTP configurado. */
+  get enabled(): boolean {
+    return this.transport !== null;
+  }
+
   async send(to: string, subject: string, text: string): Promise<void> {
     if (!this.transport) {
       // SMTP é opcional: sem ele, nenhum email é enviado (somente a recuperação de senha usa email).

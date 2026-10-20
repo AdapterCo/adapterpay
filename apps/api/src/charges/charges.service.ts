@@ -12,7 +12,7 @@ import {
   writeAudit,
   type CoreDeps,
 } from '@adapterpay/core';
-import { isPgUniqueViolation, type ChargeStatus, type Prisma } from '@adapterpay/database';
+import { isPgUniqueViolation, isUniqueViolation, type ChargeStatus, type Prisma } from '@adapterpay/database';
 import { ERROR_CODES, evaluateOrder, type CreateChargeInput, type listChargesQuerySchema } from '@adapterpay/shared';
 import type { z } from 'zod';
 import { assertStoreAccess, storeScope } from '../common/access';
@@ -129,6 +129,17 @@ export class ChargesService {
         return charge.id;
       });
     } catch (err) {
+      // Duas requisições simultâneas com a mesma Idempotency-Key: a segunda devolve a cobrança da primeira.
+      // O nome do alvo em P2002 varia (campo ou coluna); a existência da cobrança com a mesma chave confirma o caso.
+      if (clientRequestId && isUniqueViolation(err)) {
+        const prior = await this.deps.prisma.charge.findUnique({ where: { tenantId_clientRequestId: { tenantId, clientRequestId } } });
+        if (prior) {
+          if (prior.posId !== input.posId || prior.amountCents !== input.amountCents) {
+            throw Errors.conflict('Idempotency-Key reutilizada com dados diferentes');
+          }
+          return this.detail(auth, prior.id);
+        }
+      }
       if (isPgUniqueViolation(err, 'charges_one_active_per_pos') || isPgUniqueViolation(err, 'active_charge_id')) {
         const busy = await this.deps.prisma.posTerminal.findUnique({ where: { id: pos.id } });
         if (busy?.activeChargeId) await this.throwPosBusy(this.deps.prisma, busy.activeChargeId);
@@ -196,11 +207,11 @@ export class ChargesService {
           }
         : {}),
     };
-    // VENDEDOR vê apenas as próprias vendas do dia nas lojas autorizadas? Spec: "consulta vendas do dia".
+    // VENDEDOR consulta só as vendas das últimas 24 h nas lojas autorizadas; um `from` mais antigo não amplia a janela.
     if (auth.role === 'VENDEDOR') {
-      const startOfDay = new Date();
-      startOfDay.setUTCHours(startOfDay.getUTCHours() - 24);
-      where.createdAt = { gte: startOfDay, ...(typeof where.createdAt === 'object' ? where.createdAt : {}) };
+      const since = new Date(Date.now() - 24 * 3600 * 1000);
+      const from = q.from ? new Date(q.from) : null;
+      where.createdAt = { gte: from && from > since ? from : since, ...(q.to ? { lte: new Date(q.to) } : {}) };
     }
     const [total, items] = await Promise.all([
       this.deps.prisma.charge.count({ where }),

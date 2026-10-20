@@ -20,7 +20,8 @@ Gerar segredos: `openssl rand -base64 32` (ENCRYPTION_KEY), `openssl rand -base6
 | Build | `docker compose -f docker-compose.prod.yml build` |
 | Migrar | `docker compose -f docker-compose.prod.yml run --rm migrate` |
 | Subir | `docker compose -f docker-compose.prod.yml up -d` |
-| Deploy completo | `infra/scripts/deploy.sh [release]` |
+| Deploy completo | `infra/scripts/deploy.sh [release]` (faz `git pull --ff-only origin master` antes; `SKIP_PULL=1` desliga) |
+| Senha temporária (suporte, sem SMTP) | `docker compose -f docker-compose.prod.yml run --rm --entrypoint node api dist/cli/reset-password.js cliente@email.com` |
 | Logs | `docker compose -f docker-compose.prod.yml logs -f --tail=200 api worker` |
 | Saúde | `infra/scripts/healthcheck.sh` · `/api/v1/health/ready` · superadmin › Operação |
 | Backup | `infra/scripts/backup.sh` (cron a cada 6 h) |

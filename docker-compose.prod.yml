@@ -6,14 +6,17 @@
 # Variáveis: .env no diretório do projeto (ver .env.example). Inspecione a VPS antes (infra/traefik/README.md).
 name: adapterpay
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# Só api e worker recebem o .env completo (segredos). web e migrate recebem apenas o que usam.
 x-app: &app
   env_file: .env
   restart: unless-stopped
-  logging:
-    driver: json-file
-    options:
-      max-size: "20m"
-      max-file: "5"
+  logging: *logging
 
 services:
   postgres:
@@ -49,7 +52,9 @@ services:
       retries: 10
 
   migrate:
-    <<: *app
+    logging: *logging
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
     image: adapterpay-migrate:${RELEASE:-latest}
     build: { context: ., dockerfile: infra/docker/Dockerfile, target: migrate }
     restart: "no"
@@ -88,7 +93,10 @@ services:
     stop_grace_period: 30s
 
   web:
-    <<: *app
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      APP_URL: ${APP_URL}
     image: adapterpay-web:${RELEASE:-latest}
     build: { context: ., dockerfile: infra/docker/Dockerfile, target: web }
     depends_on:

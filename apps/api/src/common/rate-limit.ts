@@ -24,8 +24,9 @@ export class RateLimitService {
   /** Janela fixa via INCR/EXPIRE. Retorna segundos para nova tentativa quando excedido. */
   async hit(bucket: string, limit: number, windowSec: number): Promise<{ allowed: boolean; retryAfter: number }> {
     const key = `ap:rl:${bucket}`;
-    const n = await this.deps.redis.incr(key);
-    if (n === 1) await this.deps.redis.expire(key, windowSec);
+    // INCR e EXPIRE na mesma transação: a chave nunca fica sem prazo (o que bloquearia o usuário para sempre).
+    const res = await this.deps.redis.multi().incr(key).expire(key, windowSec, 'NX').exec();
+    const n = Number(res?.[0]?.[1] ?? 0);
     if (n > limit) {
       const ttl = await this.deps.redis.ttl(key);
       return { allowed: false, retryAfter: ttl > 0 ? ttl : windowSec };

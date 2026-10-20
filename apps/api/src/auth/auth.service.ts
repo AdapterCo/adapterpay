@@ -126,11 +126,15 @@ export class AuthService {
     const ok = await verifyPassword(user?.passwordHash ?? null, input.password);
     if (!user || !ok) {
       if (user) {
-        const failed = user.failedLogins + 1;
-        await this.deps.prisma.user.update({
+        // Incremento atômico: tentativas simultâneas não "perdem" erros e não escapam do bloqueio.
+        const { failedLogins } = await this.deps.prisma.user.update({
           where: { id: user.id },
-          data: { failedLogins: failed, lockedUntil: failed >= MAX_FAILED_LOGINS ? new Date(Date.now() + LOCK_MS) : null },
+          data: { failedLogins: { increment: 1 } },
+          select: { failedLogins: true },
         });
+        if (failedLogins >= MAX_FAILED_LOGINS) {
+          await this.deps.prisma.user.update({ where: { id: user.id }, data: { lockedUntil: new Date(Date.now() + LOCK_MS) } });
+        }
       }
       throw invalid;
     }
@@ -176,10 +180,11 @@ export class AuthService {
     }
     const hash = sha256Hex(code.toUpperCase());
     if (!user.mfaRecoveryHashes.includes(hash)) return false;
-    await this.deps.prisma.user.update({
-      where: { id: user.id },
-      data: { mfaRecoveryHashes: user.mfaRecoveryHashes.filter((h) => h !== hash) },
-    });
+    // Uso único mesmo com requisições simultâneas: só quem remove o código do banco é aceito.
+    const used = await this.deps.prisma.$executeRaw`
+      UPDATE users SET mfa_recovery_hashes = array_remove(mfa_recovery_hashes, ${hash})
+      WHERE id = ${user.id}::uuid AND ${hash} = ANY(mfa_recovery_hashes)`;
+    if (used !== 1) return false;
     await writeAudit(this.deps.prisma, {
       actorUserId: user.id,
       actorType: 'USER',
@@ -196,17 +201,20 @@ export class AuthService {
 
   // ------------------------------------------------------------------ senha
 
-  async forgotPassword(email: string, meta: RequestMeta): Promise<void> {
+  /** Retorna se o envio de email está ativo (nunca revela se a conta existe). */
+  async forgotPassword(email: string, meta: RequestMeta): Promise<boolean> {
     await this.limiter.enforce(`forgot:${meta.ip}`, 5, 3600);
     await this.limiter.enforce(`forgot-email:${sha256Hex(email)}`, 3, 3600);
+    if (!this.mailer.enabled) return false;
     const user = await this.deps.prisma.user.findUnique({ where: { email } });
-    if (!user || user.status === 'DISABLED') return;
+    if (!user || user.status === 'DISABLED') return true;
     const token = await this.issueEmailToken(user.id, 'RESET_PASSWORD', 3600 * 1000);
     await this.mailer.send(
       user.email,
       'Redefinição de senha',
       `Recebemos um pedido para redefinir sua senha.\n${this.link(`/redefinir-senha?token=${token}`)}\n\nO link expira em 1 hora. Se não foi você, ignore este email.`,
     );
+    return true;
   }
 
   async resetPassword(token: string, password: string, meta: RequestMeta): Promise<void> {
@@ -338,6 +346,7 @@ export class AuthService {
   }
 
   async mfaDisable(auth: AuthContext, code: string, meta: RequestMeta): Promise<void> {
+    await this.limiter.enforce(`mfa:${auth.userId}`, 10, 900);
     const user = await this.deps.prisma.user.findUniqueOrThrow({ where: { id: auth.userId } });
     if (user.isSuperadmin) throw Errors.forbidden('MFA é obrigatório para a equipe Adapter Co');
     if (auth.requireAdminMfa && auth.role === 'ADMIN') throw Errors.forbidden('A empresa exige MFA para administradores');

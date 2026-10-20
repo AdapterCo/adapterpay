@@ -11,7 +11,7 @@
   "dependencies": {
     "@adapterpay/shared": "workspace:*",
     "@adapterpay/ui": "workspace:*",
-    "next": "^15.3.4",
+    "next": "^15.5.28",
     "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

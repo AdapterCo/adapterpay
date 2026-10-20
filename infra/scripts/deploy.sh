@@ -4,7 +4,15 @@
 # - Executa o job de migração; se falhar, ABORTA sem trocar api/worker/web.
 # - Sobe os serviços e verifica saúde; registra o release anterior para rollback.
 set -euo pipefail
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/../.."
+
+# Atualiza o código antes do build e reexecuta a versão nova deste script (SKIP_PULL=1 desliga).
+if [ -z "${SKIP_PULL:-}" ] && git rev-parse --git-dir >/dev/null 2>&1; then
+  echo ">> git pull (origin master)"
+  git pull --ff-only origin master
+  exec env SKIP_PULL=1 "$SELF" "$@"
+fi
 
 RELEASE="${1:-$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
 COMPOSE="docker compose -f docker-compose.prod.yml"

@@ -77,9 +77,9 @@ export class AuthController {
 
   @Public()
   @Post('forgot-password')
-  @HttpCode(204)
-  async forgot(@ZBody(forgotPasswordSchema) body: z.infer<typeof forgotPasswordSchema>, @Meta() meta: RequestMeta): Promise<void> {
-    await this.auth.forgotPassword(body.email, meta);
+  @HttpCode(200)
+  async forgot(@ZBody(forgotPasswordSchema) body: z.infer<typeof forgotPasswordSchema>, @Meta() meta: RequestMeta): Promise<{ emailEnabled: boolean }> {
+    return { emailEnabled: await this.auth.forgotPassword(body.email, meta) };
   }
 
   @Public()
