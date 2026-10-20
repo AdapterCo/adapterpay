@@ -12,7 +12,7 @@ import {
   type CoreDeps,
 } from '@adapterpay/core';
 import { isUniqueViolation, type Prisma } from '@adapterpay/database';
-import type { createStoreSchema, importStoresConfirmSchema, updateStoreSchema } from '@adapterpay/shared';
+import { normalizeStateName, type createStoreSchema, type importStoresConfirmSchema, type updateStoreSchema } from '@adapterpay/shared';
 import type { z } from 'zod';
 import { storeIdScope } from '../common/access';
 import { Errors } from '../common/errors';
@@ -65,6 +65,12 @@ export class StoresService {
     }
     if (input.createRemote && (input.address?.latitude === undefined || input.address?.longitude === undefined)) {
       throw Errors.validation('O Mercado Pago exige as coordenadas (latitude e longitude) da loja');
+    }
+    if (input.address) {
+      // O MP só aceita o nome completo do estado ("São Paulo"); "SP" ou nome sem acento são convertidos.
+      const stateName = normalizeStateName(input.address.stateName);
+      if (stateName) input = { ...input, address: { ...input.address, stateName } };
+      else if (input.createRemote) throw Errors.validation('Estado inválido. Escolha um estado da lista');
     }
     const wantsActive = input.activate && !input.createRemote;
 

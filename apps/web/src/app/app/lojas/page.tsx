@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { BR_STATES } from '@adapterpay/shared';
 import { Alert, Badge, Button, Card, Checkbox, Dialog, EmptyState, Field, Input, PageHeader, Select, Spinner, Table, Td, Th } from '@adapterpay/ui';
 import { api, errorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
@@ -266,13 +267,22 @@ export default function StoresPage() {
               <Field label="Rua">{(p) => <Input {...p} required value={form.streetName} onChange={(e) => setForm({ ...form, streetName: e.target.value })} />}</Field>
               <Field label="Número">{(p) => <Input {...p} required value={form.streetNumber} onChange={(e) => setForm({ ...form, streetNumber: e.target.value })} />}</Field>
               <Field label="Cidade">{(p) => <Input {...p} required value={form.cityName} onChange={(e) => setForm({ ...form, cityName: e.target.value })} />}</Field>
-              <Field label="Estado">{(p) => <Input {...p} required value={form.stateName} onChange={(e) => setForm({ ...form, stateName: e.target.value })} />}</Field>
+              <Field label="Estado">
+                {(p) => (
+                  <Select {...p} required value={form.stateName} onChange={(e) => setForm({ ...form, stateName: e.target.value })}>
+                    <option value="" disabled>Escolha o estado</option>
+                    {BR_STATES.map((s) => (
+                      <option key={s.uf} value={s.name}>{s.name}</option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
               <Field label="CEP">{(p) => <Input {...p} value={form.zipCode} onChange={(e) => setForm({ ...form, zipCode: e.target.value })} />}</Field>
               <Field label="Referência">{(p) => <Input {...p} value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />}</Field>
               <Field label="Coordenadas (latitude, longitude)" className="sm:col-span-2" hint="No Google Maps, clique com o botão direito no local da loja e clique nos números para copiar. Ex.: -23.5505, -46.6333">
                 {(p) => <Input {...p} required inputMode="decimal" placeholder="-23.5505, -46.6333" value={form.coords} onChange={(e) => setForm({ ...form, coords: e.target.value })} />}
               </Field>
-              <p className="text-xs text-slate-500 sm:col-span-2">Escreva estado e cidade por extenso e com acento, como no Mercado Pago (ex.: São Paulo / São Paulo).</p>
+              <p className="text-xs text-slate-500 sm:col-span-2">Escreva a cidade por extenso e com acento, como no Mercado Pago (ex.: São Paulo).</p>
             </>
           )}
           <Checkbox className="sm:col-span-2" checked={form.activate} onChange={(e) => setForm({ ...form, activate: e.target.checked })} label="Ativar agora (respeitando o limite do plano)" />
