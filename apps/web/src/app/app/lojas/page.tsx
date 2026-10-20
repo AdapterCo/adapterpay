@@ -49,7 +49,7 @@ const emptyForm = {
 
 /** Aceita "-23.5505, -46.6333" (formato copiado do Google Maps). */
 function parseCoords(v: string): { latitude: number; longitude: number } | null {
-  const m = /^s*(-?d{1,2}(?:.d+)?)s*[,; ]s*(-?d{1,3}(?:.d+)?)s*$/.exec(v);
+  const m = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/.exec(v.replace(/−/g, '-'));
   if (!m) return null;
   const latitude = Number(m[1]);
   const longitude = Number(m[2]);
