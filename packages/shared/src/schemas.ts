@@ -193,6 +193,15 @@ export const redeemRewardSchema = z.object({ code: z.string().trim().toUpperCase
 
 export const productInputSchema = z.object({
   name: z.string().trim().min(1, 'Informe o nome').max(80),
+  /** Código de barras (EAN) ou interno. Vazio = sem código. */
+  code: z
+    .string()
+    .trim()
+    .max(40)
+    .regex(/^[A-Za-z0-9._-]*$/, 'Use só letras, números, ponto, hífen ou sublinhado')
+    .transform((v) => v || null)
+    .nullable()
+    .optional(),
   priceCents: z.number().int().positive('O preço deve ser positivo').max(MAX_CHARGE_CENTS),
   category: z.string().trim().max(40).nullable().optional(),
   active: z.boolean().optional(),

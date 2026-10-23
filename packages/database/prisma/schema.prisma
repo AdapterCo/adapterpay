@@ -170,6 +170,8 @@ model Product {
   id         String   @id @default(uuid()) @db.Uuid
   tenantId   String   @map("tenant_id") @db.Uuid
   name       String
+  /// código de barras (EAN) ou código interno, lido pelo leitor no caixa; único por empresa
+  code       String?
   priceCents Int      @map("price_cents")
   category   String?
   active     Boolean  @default(true)
@@ -180,6 +182,7 @@ model Product {
   tenant Tenant       @relation(fields: [tenantId], references: [id])
   items  ChargeItem[]
 
+  @@unique([tenantId, code])
   @@index([tenantId, active])
   @@map("products")
 }

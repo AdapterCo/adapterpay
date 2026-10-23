@@ -43,9 +43,13 @@ interface ChargeDetail {
 interface Product {
   id: string;
   name: string;
+  code: string | null;
   priceCents: number;
   category: string | null;
 }
+
+/** Leitores de código de barras "digitam" muito rápido: intervalos menores que isso indicam leitura. */
+const SCANNER_MAX_GAP_MS = 50;
 
 const LAST_POS_KEY = 'adapterpay:last-pos';
 const LAST_AMOUNT_KEY = 'adapterpay:last-amount';
@@ -162,6 +166,51 @@ export default function NewChargePage() {
     else next[id] = Math.min(qty, 999);
     return next;
   });
+
+  // Leitor de código de barras: campo próprio + captura em qualquer ponto da tela (modo Produtos).
+  const [scanCode, setScanCode] = useState('');
+  const [scanMsg, setScanMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const byCode = useMemo(() => new Map(catalog.filter((p) => p.code).map((p) => [p.code!.toLowerCase(), p])), [catalog]);
+
+  const addByCode = useCallback(
+    (raw: string) => {
+      const code = raw.trim();
+      if (!code) return;
+      const p = byCode.get(code.toLowerCase());
+      if (p) {
+        setCart((c) => ({ ...c, [p.id]: Math.min((c[p.id] ?? 0) + 1, 999) }));
+        setScanMsg({ ok: true, text: `Adicionado: ${p.name}` });
+      } else {
+        setScanMsg({ ok: false, text: `Código ${code} não encontrado no catálogo` });
+      }
+    },
+    [byCode],
+  );
+
+  useEffect(() => {
+    if (mode !== 'catalog' || charge) return;
+    let buffer = '';
+    let last = 0;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      // Digitação normal em outros campos segue intacta; o campo do leitor trata o próprio Enter.
+      if (t && t !== document.body && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const now = performance.now();
+      if (now - last > SCANNER_MAX_GAP_MS) buffer = '';
+      last = now;
+      if (e.key === 'Enter') {
+        if (buffer.length >= 3) {
+          e.preventDefault();
+          addByCode(buffer);
+        }
+        buffer = '';
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mode, charge, addByCode]);
 
   const pickAmount = (cents: number) => {
     setAmount(cents);
@@ -347,6 +396,30 @@ export default function NewChargePage() {
       ) : mode === 'catalog' ? (
         <form onSubmit={submit} className="grid gap-6 lg:grid-cols-[1fr_360px]" noValidate>
           <section aria-label="Catálogo">
+            {byCode.size > 0 && (
+              <div className="mb-4">
+                <label htmlFor="leitor" className="text-sm font-medium text-ink">Código do produto / leitor</label>
+                <Input
+                  id="leitor"
+                  autoFocus
+                  autoComplete="off"
+                  inputMode="numeric"
+                  placeholder="Leia o código de barras ou digite e tecle Enter"
+                  className="mt-1 font-mono"
+                  value={scanCode}
+                  onChange={(e) => setScanCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    addByCode(scanCode);
+                    setScanCode('');
+                  }}
+                />
+                {scanMsg && (
+                  <p role="status" className={`mt-1 text-sm ${scanMsg.ok ? 'text-paid' : 'text-red-700'}`}>{scanMsg.text}</p>
+                )}
+              </div>
+            )}
             {categories.length > 0 && (
               <div className="mb-4 flex flex-wrap gap-2">
                 {[null, ...categories].map((c) => (

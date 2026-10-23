@@ -10,14 +10,15 @@ import { useApi } from '@/lib/hooks';
 interface Product {
   id: string;
   name: string;
+  code: string | null;
   priceCents: number;
   category: string | null;
   active: boolean;
   sortOrder: number;
 }
 
-type Draft = { id: string | null; name: string; priceCents: number | null; category: string; active: boolean };
-const EMPTY: Draft = { id: null, name: '', priceCents: null, category: '', active: true };
+type Draft = { id: string | null; name: string; code: string; priceCents: number | null; category: string; active: boolean };
+const EMPTY: Draft = { id: null, name: '', code: '', priceCents: null, category: '', active: true };
 
 /** Catálogo da cobrança rápida: o vendedor toca nos produtos e o total é calculado no servidor. */
 export default function ProductsPage() {
@@ -35,7 +36,7 @@ export default function ProductsPage() {
     setSaving(true);
     setError(null);
     try {
-      const body = { name: draft.name, priceCents: draft.priceCents, category: draft.category.trim() || null, active: draft.active };
+      const body = { name: draft.name, code: draft.code.trim() || null, priceCents: draft.priceCents, category: draft.category.trim() || null, active: draft.active };
       await api(draft.id ? `/products/${draft.id}` : '/products', { method: draft.id ? 'PATCH' : 'POST', body });
       setDraft(null);
       await products.reload();
@@ -88,18 +89,19 @@ export default function ProductsPage() {
         ) : (
           <Table>
             <thead>
-              <tr><Th>Produto</Th><Th>Categoria</Th><Th className="text-right">Preço</Th><Th>Situação</Th><Th className="text-right">Ações</Th></tr>
+              <tr><Th>Produto</Th><Th>Código</Th><Th>Categoria</Th><Th className="text-right">Preço</Th><Th>Situação</Th><Th className="text-right">Ações</Th></tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {products.data.map((p) => (
                 <tr key={p.id}>
                   <Td className="font-medium">{p.name}</Td>
+                  <Td className="font-mono text-xs text-slate-600">{p.code ?? '—'}</Td>
                   <Td className="text-slate-600">{p.category ?? '—'}</Td>
                   <Td className="text-right tabular-nums">{formatBRL(p.priceCents)}</Td>
                   <Td>{p.active ? <Badge tone="success">À venda</Badge> : <Badge>Pausado</Badge>}</Td>
                   <Td className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => { setError(null); setDraft({ id: p.id, name: p.name, priceCents: p.priceCents, category: p.category ?? '', active: p.active }); }}>Editar</Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setError(null); setDraft({ id: p.id, name: p.name, code: p.code ?? '', priceCents: p.priceCents, category: p.category ?? '', active: p.active }); }}>Editar</Button>
                       <Button size="sm" variant="ghost" onClick={() => void toggle(p)}>{p.active ? 'Pausar' : 'Reativar'}</Button>
                       <Button size="sm" variant="ghost" onClick={() => void remove(p)}>Remover</Button>
                     </div>
@@ -116,6 +118,19 @@ export default function ProductsPage() {
           <form onSubmit={save} className="flex flex-col gap-4">
             {error && <Alert tone="danger">{error}</Alert>}
             <Field label="Nome">{(p) => <Input {...p} required maxLength={80} autoFocus value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />}</Field>
+            <Field label="Código (opcional)" hint="Leia o código de barras com o leitor ou digite um código interno.">
+              {(p) => (
+                <Input
+                  {...p}
+                  maxLength={40}
+                  autoComplete="off"
+                  className="font-mono"
+                  value={draft.code}
+                  onChange={(e) => setDraft({ ...draft, code: e.target.value.replace(/\s/g, '') })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                />
+              )}
+            </Field>
             <Field label="Preço">{(p) => <MoneyInput {...p} key={draft.id ?? 'novo'} valueCents={draft.priceCents} onChange={(c) => setDraft({ ...draft, priceCents: c })} />}</Field>
             <Field label="Categoria (opcional)" hint="Agrupa os produtos na tela de cobrança.">
               {(p) => (

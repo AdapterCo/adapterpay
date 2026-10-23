@@ -1,6 +1,7 @@
 import { Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { writeAudit, type CoreDeps } from '@adapterpay/core';
+import { isUniqueViolation } from '@adapterpay/database';
 import { productInputSchema, productUpdateSchema, type ProductInput } from '@adapterpay/shared';
 import type { z } from 'zod';
 import { RequirePermission } from '../auth/decorators';
@@ -23,8 +24,18 @@ export class ProductsController {
     return this.deps.prisma.product.findMany({
       where: { tenantId: requireTenant(auth), ...(auth.role === 'ADMIN' ? {} : { active: true }) },
       orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
-      select: { id: true, name: true, priceCents: true, category: true, active: true, sortOrder: true },
+      select: { id: true, name: true, code: true, priceCents: true, category: true, active: true, sortOrder: true },
     });
+  }
+
+  /** Código único por empresa: o leitor de código de barras precisa achar um só produto. */
+  private async save<T>(op: () => Promise<T>): Promise<T> {
+    try {
+      return await op();
+    } catch (err) {
+      if (isUniqueViolation(err)) throw Errors.conflict('Já existe um produto com este código');
+      throw err;
+    }
   }
 
   @Post()
@@ -36,7 +47,7 @@ export class ProductsController {
     if ((await this.deps.prisma.product.count({ where: { tenantId } })) >= MAX_PRODUCTS) {
       throw Errors.validation(`Limite de ${MAX_PRODUCTS} produtos no catálogo`);
     }
-    const p = await this.deps.prisma.product.create({ data: { ...body, category: body.category || null, tenantId } });
+    const p = await this.save(() => this.deps.prisma.product.create({ data: { ...body, category: body.category || null, tenantId } }));
     await this.audit(auth, meta, p.id, 'product.created', undefined, { name: p.name, priceCents: p.priceCents });
     return p;
   }
@@ -52,7 +63,7 @@ export class ProductsController {
   ) {
     const before = await this.find(auth, id);
     const data = body.category !== undefined ? { ...body, category: body.category || null } : body;
-    const p = await this.deps.prisma.product.update({ where: { id: before.id }, data });
+    const p = await this.save(() => this.deps.prisma.product.update({ where: { id: before.id }, data }));
     await this.audit(auth, meta, id, 'product.updated', { name: before.name, priceCents: before.priceCents, active: before.active }, {
       name: p.name,
       priceCents: p.priceCents,
