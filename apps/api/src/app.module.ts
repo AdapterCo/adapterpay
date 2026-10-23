@@ -14,6 +14,7 @@ import { HealthModule } from './health/health.module';
 import { MercadoPagoModule } from './integrations/mercado-pago/mercado-pago.module';
 import { PlansModule } from './plans/plans.module';
 import { PosModule } from './pos/pos.module';
+import { ProductsModule } from './products/products.module';
 import { PublicModule } from './public/public.module';
 import { ReportsModule } from './reports/reports.module';
 import { StoresModule } from './stores/stores.module';
@@ -32,6 +33,7 @@ import { UsersModule } from './users/users.module';
     StoresModule,
     PosModule,
     ChargesModule,
+    ProductsModule,
     PublicModule,
     EventsModule,
     ReportsModule,

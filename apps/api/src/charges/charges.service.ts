@@ -13,7 +13,7 @@ import {
   type CoreDeps,
 } from '@adapterpay/core';
 import { isPgUniqueViolation, isUniqueViolation, type ChargeStatus, type Prisma } from '@adapterpay/database';
-import { ERROR_CODES, evaluateOrder, type CreateChargeInput, type listChargesQuerySchema } from '@adapterpay/shared';
+import { cartDescription, cartTotalCents, ERROR_CODES, evaluateOrder, MAX_CHARGE_CENTS, type CartLine, type CreateChargeInput, type listChargesQuerySchema } from '@adapterpay/shared';
 import type { z } from 'zod';
 import { assertStoreAccess, storeScope } from '../common/access';
 import { AppError, Errors } from '../common/errors';
@@ -77,6 +77,29 @@ export class ChargesService {
       throw new AppError(409, ERROR_CODES.MP_RECONNECT_REQUIRED, 'A conta Mercado Pago deste POS precisa ser reconectada');
     }
 
+    // Carrinho do catálogo: preços SEMPRE do servidor; o total enviado precisa bater com o recalculado.
+    let lines: Array<CartLine & { productId: string }> = [];
+    if (input.items?.length) {
+      const products = await this.deps.prisma.product.findMany({
+        where: { tenantId, active: true, id: { in: input.items.map((i) => i.productId) } },
+        select: { id: true, name: true, priceCents: true },
+      });
+      const byId = new Map(products.map((p) => [p.id, p]));
+      if (byId.size !== input.items.length) {
+        throw Errors.validation('Um ou mais produtos do carrinho não estão mais disponíveis. Atualize o catálogo.');
+      }
+      lines = input.items.map((i) => {
+        const p = byId.get(i.productId)!;
+        return { productId: p.id, name: p.name, unitPriceCents: p.priceCents, quantity: i.quantity };
+      });
+      const total = cartTotalCents(lines);
+      if (total > MAX_CHARGE_CENTS) throw Errors.validation('Total do carrinho acima do limite por cobrança');
+      if (total !== input.amountCents) {
+        throw new AppError(409, ERROR_CODES.CONFLICT, 'Os preços do catálogo mudaram. Confira o total e gere a cobrança de novo.', { amountCents: total });
+      }
+    }
+    const description = input.description || (lines.length ? cartDescription(lines) : null);
+
     let chargeId: string;
     try {
       chargeId = await this.deps.prisma.$transaction(async (tx) => {
@@ -99,11 +122,16 @@ export class ChargesService {
             clientRequestId: clientRequestId ?? null,
             externalPosId: pos.externalId!,
             amountCents: input.amountCents,
-            description: input.description ?? null,
+            description,
             status: 'CREATING',
             publicToken: randomToken(24),
           },
         });
+        if (lines.length) {
+          await tx.chargeItem.createMany({
+            data: lines.map((l) => ({ chargeId: charge.id, productId: l.productId, name: l.name, unitPriceCents: l.unitPriceCents, quantity: l.quantity })),
+          });
+        }
         await tx.posTerminal.update({ where: { id: pos.id }, data: { activeChargeId: charge.id } });
         // Job de polling já nasce com lease da API; se a API cair antes do envio, o worker reconcilia.
         await tx.pollingJob.create({
@@ -263,6 +291,7 @@ export class ChargesService {
         seller: { select: { id: true, name: true } },
         payments: true,
         events: { orderBy: { occurredAt: 'asc' }, select: { previousState: true, newState: true, reason: true, occurredAt: true } },
+        items: { select: { name: true, unitPriceCents: true, quantity: true } },
       },
     });
     if (!c) throw Errors.notFound('Cobrança');
@@ -305,6 +334,7 @@ export class ChargesService {
         refundedAt: p.refundedAt,
       })),
       events: c.events,
+      items: c.items,
     };
   }
 

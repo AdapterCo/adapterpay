@@ -148,10 +148,46 @@ model Tenant {
   notifications Notification[]
   storeMemberships StoreMembership[]
   dailyReports  DailyReport[]
+  products      Product[]
 
   @@index([status])
   @@index([taxIdHash])
   @@map("tenants")
+}
+
+/// Catálogo de produtos da empresa (cobrança rápida). Preço é sempre o do servidor.
+model Product {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  name       String
+  priceCents Int      @map("price_cents")
+  category   String?
+  active     Boolean  @default(true)
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id])
+  items  ChargeItem[]
+
+  @@index([tenantId, active])
+  @@map("products")
+}
+
+/// Itens vendidos numa cobrança: cópia de nome/preço no momento da venda (não muda se o produto mudar).
+model ChargeItem {
+  id             String  @id @default(uuid()) @db.Uuid
+  chargeId       String  @map("charge_id") @db.Uuid
+  productId      String? @map("product_id") @db.Uuid
+  name           String
+  unitPriceCents Int     @map("unit_price_cents")
+  quantity       Int
+
+  charge  Charge   @relation(fields: [chargeId], references: [id])
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([chargeId])
+  @@map("charge_items")
 }
 
 /// Fechamento de caixa diário: uma linha por tenant e dia local garante envio único.
@@ -419,6 +455,7 @@ model Charge {
   mpConnection MpConnection   @relation(fields: [mpConnectionId, tenantId], references: [id, tenantId])
   payments     Payment[]
   events       PaymentEvent[]
+  items        ChargeItem[]
   pollingJob   PollingJob?
 
   @@unique([tenantId, clientRequestId])

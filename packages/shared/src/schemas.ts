@@ -158,7 +158,24 @@ export const createChargeSchema = z.object({
   posId: uuid,
   amountCents: z.number().int().positive('O valor deve ser positivo').max(MAX_CHARGE_CENTS),
   description: z.string().trim().max(140).optional(),
+  /** Itens do catálogo. Quando enviados, o servidor recalcula o total com os preços atuais e confere com amountCents. */
+  items: z
+    .array(z.object({ productId: uuid, quantity: z.number().int().min(1).max(999) }))
+    .min(1)
+    .max(50)
+    .refine((a) => new Set(a.map((i) => i.productId)).size === a.length, 'Produto repetido no carrinho')
+    .optional(),
 });
+
+export const productInputSchema = z.object({
+  name: z.string().trim().min(1, 'Informe o nome').max(80),
+  priceCents: z.number().int().positive('O preço deve ser positivo').max(MAX_CHARGE_CENTS),
+  category: z.string().trim().max(40).nullable().optional(),
+  active: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(9999).optional(),
+});
+export const productUpdateSchema = productInputSchema.partial();
+export type ProductInput = z.infer<typeof productInputSchema>;
 export type CreateChargeInput = z.infer<typeof createChargeSchema>;
 
 export const listChargesQuerySchema = z.object({

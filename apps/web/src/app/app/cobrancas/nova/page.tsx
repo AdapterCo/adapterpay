@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { formatBRL, MAX_CHARGE_CENTS } from '@adapterpay/shared';
+import { cartDescription, cartTotalCents, formatBRL, MAX_CHARGE_CENTS } from '@adapterpay/shared';
 import { Alert, Button, Card, CardBody, Field, Input, PageHeader, Select, Spinner } from '@adapterpay/ui';
 import { ChargeStatusBadge, CopyButton, Countdown, MoneyInput, QrImage } from '@/components/domain';
 import { api, ApiError, errorMessage, newIdempotencyKey } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
-import { useNow, useServerOffset } from '@/lib/hooks';
+import { useApi, useNow, useServerOffset } from '@/lib/hooks';
+import { useSession } from '@/lib/session';
 
 interface PosItem {
   id: string;
@@ -35,15 +36,47 @@ interface ChargeDetail {
   publicPosUrl: string;
   posName: string;
   storeName: string;
+  items?: Array<{ name: string; unitPriceCents: number; quantity: number }>;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  priceCents: number;
+  category: string | null;
 }
 
 const LAST_POS_KEY = 'adapterpay:last-pos';
+const LAST_AMOUNT_KEY = 'adapterpay:last-amount';
+const QUICK_VALUES = [500, 1000, 2000, 5000, 10000];
 
-/** Cobrança rápida: o vendedor define o valor; o backend cria a Order e acompanha por polling. */
+function readStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* navegação privada: segue sem lembrar */
+  }
+}
+
+/**
+ * Cobrança rápida: por produtos do catálogo (total recalculado no servidor) ou por valor livre,
+ * com atalhos de valores. O backend cria a Order e acompanha por polling.
+ */
 export default function NewChargePage() {
+  const { can } = useSession();
   const [posList, setPosList] = useState<PosItem[] | null>(null);
   const [posId, setPosId] = useState('');
   const [amount, setAmount] = useState<number | null>(null);
+  const [amountKey, setAmountKey] = useState(0);
+  const [lastAmount, setLastAmount] = useState<number | null>(null);
   const [description, setDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<{ remainingSeconds: number | null; chargeId: string } | null>(null);
@@ -51,16 +84,29 @@ export default function NewChargePage() {
   const [charge, setCharge] = useState<ChargeDetail | null>(null);
   const idemKey = useRef(newIdempotencyKey());
 
+  const products = useApi<Product[]>(can('products:read') ? '/products' : null);
+  const catalog = useMemo(() => products.data ?? [], [products.data]);
+  const [mode, setMode] = useState<'catalog' | 'amount' | null>(null);
+  const [category, setCategory] = useState<string | null>(null);
+  const [cart, setCart] = useState<Record<string, number>>({});
+
   useEffect(() => {
     api<PosItem[]>('/pos')
       .then((items) => {
         setPosList(items);
         const ready = items.filter((p) => p.orderReady);
-        const last = typeof window !== 'undefined' ? window.localStorage.getItem(LAST_POS_KEY) : null;
+        const last = readStorage(LAST_POS_KEY);
         setPosId((last && ready.some((p) => p.id === last) ? last : ready[0]?.id) ?? '');
       })
       .catch((err) => setError(errorMessage(err)));
+    const last = Number(readStorage(LAST_AMOUNT_KEY));
+    if (Number.isSafeInteger(last) && last > 0 && last <= MAX_CHARGE_CENTS) setLastAmount(last);
   }, []);
+
+  // Com catálogo cadastrado, a tela abre no modo Produtos; sem catálogo, no valor livre.
+  useEffect(() => {
+    if (mode === null && (products.data || !can('products:read'))) setMode(catalog.length ? 'catalog' : 'amount');
+  }, [mode, products.data, catalog.length, can]);
 
   const refresh = useCallback(async (id: string) => {
     try {
@@ -90,26 +136,56 @@ export default function NewChargePage() {
   const now = useNow(1000);
   const selected = useMemo(() => posList?.find((p) => p.id === posId) ?? null, [posList, posId]);
 
+  const categories = useMemo(() => [...new Set(catalog.map((p) => p.category).filter((c): c is string => !!c))], [catalog]);
+  const visible = category ? catalog.filter((p) => p.category === category) : catalog;
+  const cartLines = useMemo(
+    () =>
+      catalog
+        .filter((p) => (cart[p.id] ?? 0) > 0)
+        .map((p) => ({ productId: p.id, name: p.name, unitPriceCents: p.priceCents, quantity: cart[p.id]! })),
+    [catalog, cart],
+  );
+  const cartTotal = cartTotalCents(cartLines);
+  const chargeAmount = mode === 'catalog' ? cartTotal : amount;
+
+  const setQty = (id: string, qty: number) => setCart((c) => {
+    const next = { ...c };
+    if (qty <= 0) delete next[id];
+    else next[id] = Math.min(qty, 999);
+    return next;
+  });
+
+  const pickAmount = (cents: number) => {
+    setAmount(cents);
+    setAmountKey((k) => k + 1);
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(null);
     if (!posId) return setError('Selecione um POS');
-    if (!amount || amount <= 0 || amount > MAX_CHARGE_CENTS) return setError('Informe um valor válido');
+    if (!chargeAmount || chargeAmount <= 0 || chargeAmount > MAX_CHARGE_CENTS) {
+      return setError(mode === 'catalog' ? 'Adicione produtos ao carrinho' : 'Informe um valor válido');
+    }
     setSubmitting(true);
     try {
-      const created = await api<ChargeDetail>('/charges', {
-        method: 'POST',
-        body: { posId, amountCents: amount, ...(description.trim() ? { description: description.trim() } : {}) },
-        headers: { 'Idempotency-Key': idemKey.current },
-      });
-      window.localStorage.setItem(LAST_POS_KEY, posId);
+      const body =
+        mode === 'catalog'
+          ? { posId, amountCents: cartTotal, items: cartLines.map((l) => ({ productId: l.productId, quantity: l.quantity })) }
+          : { posId, amountCents: chargeAmount, ...(description.trim() ? { description: description.trim() } : {}) };
+      const created = await api<ChargeDetail>('/charges', { method: 'POST', body, headers: { 'Idempotency-Key': idemKey.current } });
+      writeStorage(LAST_POS_KEY, posId);
+      if (mode === 'amount') {
+        writeStorage(LAST_AMOUNT_KEY, String(chargeAmount));
+        setLastAmount(chargeAmount);
+      }
       setCharge(created);
     } catch (err) {
       if (err instanceof ApiError && err.code === 'POS_BUSY') {
-        const d = err.details as { remainingSeconds: number | null; chargeId: string };
-        setBusy(d);
+        setBusy(err.details as { remainingSeconds: number | null; chargeId: string });
       } else {
+        if (err instanceof ApiError && err.code === 'CONFLICT') void products.reload();
         setError(errorMessage(err));
       }
       idemKey.current = newIdempotencyKey();
@@ -121,7 +197,9 @@ export default function NewChargePage() {
   const reset = () => {
     setCharge(null);
     setAmount(null);
+    setAmountKey((k) => k + 1);
     setDescription('');
+    setCart({});
     idemKey.current = newIdempotencyKey();
   };
 
@@ -134,6 +212,9 @@ export default function NewChargePage() {
           <CardBody className="flex flex-col items-center gap-4 py-8 text-center">
             <ChargeStatusBadge status={charge.status} />
             <p className="text-5xl font-bold tabular-nums">{formatBRL(charge.amountCents)}</p>
+            {charge.items && charge.items.length > 0 && (
+              <p className="max-w-sm text-sm text-slate-600">{cartDescription(charge.items, 300)}</p>
+            )}
             {live && charge.expiresAt && (
               <p className="text-sm text-slate-600">
                 Expira em <strong><Countdown expiresAt={charge.expiresAt} serverOffsetMs={offset} now={now} /></strong>
@@ -179,42 +260,168 @@ export default function NewChargePage() {
   }
 
   const readyCount = posList?.filter((p) => p.orderReady).length ?? 0;
+  const hasCatalog = catalog.length > 0;
+
+  const posField = posList && (
+    <Field label="POS (caixa)">
+      {(p) => (
+        <Select {...p} value={posId} onChange={(e) => setPosId(e.target.value)}>
+          {posList.map((pos) => (
+            <option key={pos.id} value={pos.id} disabled={!pos.orderReady}>
+              {pos.storeName} · {pos.name}
+              {!pos.orderReady ? ' (indisponível)' : pos.activeChargeId ? ' (ocupado)' : ''}
+            </option>
+          ))}
+        </Select>
+      )}
+    </Field>
+  );
+
+  const alerts = (
+    <>
+      {error && <Alert tone="danger">{error}</Alert>}
+      {busy && (
+        <Alert tone="warning" title="POS ocupado">
+          Este POS já tem uma cobrança em andamento{busy.remainingSeconds !== null ? ` (cerca de ${busy.remainingSeconds}s restantes)` : ''}. Use outro POS ou aguarde.{' '}
+          <Link href={`/app/cobrancas/${busy.chargeId}`} className="underline">Ver cobrança ativa</Link>
+        </Alert>
+      )}
+    </>
+  );
 
   return (
     <>
-      <PageHeader title="Nova cobrança" description="O valor é definido por você e fixado no servidor. A cobrança vale por 3 minutos." />
-      <Card className="mx-auto max-w-xl">
-        <CardBody>
-          {posList === null ? (
-            <Spinner className="h-5 w-5 text-brand-600" />
-          ) : readyCount === 0 ? (
-            <Alert tone="warning" title="Nenhum POS pronto para cobrança">
-              Ative um POS com conta Mercado Pago conectada. <Link href="/app/pos" className="underline">Ir para POS</Link>
-            </Alert>
-          ) : (
-            <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
-              {error && <Alert tone="danger">{error}</Alert>}
-              {busy && (
-                <Alert tone="warning" title="POS ocupado">
-                  Este POS já tem uma cobrança em andamento{busy.remainingSeconds !== null ? ` (cerca de ${busy.remainingSeconds}s restantes)` : ''}. Use outro POS ou aguarde.{' '}
-                  <Link href={`/app/cobrancas/${busy.chargeId}`} className="underline">Ver cobrança ativa</Link>
-                </Alert>
-              )}
-              <Field label="POS (caixa)">
-                {(p) => (
-                  <Select {...p} value={posId} onChange={(e) => setPosId(e.target.value)}>
-                    {posList.map((pos) => (
-                      <option key={pos.id} value={pos.id} disabled={!pos.orderReady}>
-                        {pos.storeName} · {pos.name}
-                        {!pos.orderReady ? ' (indisponível)' : pos.activeChargeId ? ' (ocupado)' : ''}
-                      </option>
+      <PageHeader
+        title="Nova cobrança"
+        description="O total é fixado no servidor. A cobrança vale por 3 minutos."
+        actions={
+          hasCatalog && (
+            <div role="tablist" aria-label="Forma de cobrança" className="inline-flex rounded-lg bg-slate-100 p-1">
+              {([['catalog', 'Produtos'], ['amount', 'Valor livre']] as const).map(([m, label]) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === m}
+                  onClick={() => { setMode(m); setError(null); }}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${mode === m ? 'bg-white text-ink shadow-sm' : 'text-slate-600 hover:text-ink'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )
+        }
+      />
+
+      {posList === null || mode === null ? (
+        <Spinner className="h-5 w-5 text-brand-600" />
+      ) : readyCount === 0 ? (
+        <Alert tone="warning" title="Nenhum POS pronto para cobrança">
+          Ative um POS com conta Mercado Pago conectada. <Link href="/app/pos" className="underline">Ir para POS</Link>
+        </Alert>
+      ) : mode === 'catalog' ? (
+        <form onSubmit={submit} className="grid gap-6 lg:grid-cols-[1fr_360px]" noValidate>
+          <section aria-label="Catálogo">
+            {categories.length > 0 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {[null, ...categories].map((c) => (
+                  <button
+                    key={c ?? 'todos'}
+                    type="button"
+                    onClick={() => setCategory(c)}
+                    aria-pressed={category === c}
+                    className={`rounded-full px-3 py-1.5 text-sm ${category === c ? 'bg-ink text-white' : 'bg-white text-slate-700 ring-1 ring-line hover:ring-brand-600'}`}
+                  >
+                    {c ?? 'Todos'}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+              {visible.map((p) => {
+                const qty = cart[p.id] ?? 0;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setQty(p.id, qty + 1)}
+                    aria-label={`Adicionar ${p.name}, ${formatBRL(p.priceCents)}${qty ? `. No carrinho: ${qty}` : ''}`}
+                    className={`relative flex min-h-24 flex-col justify-between rounded-xl bg-white p-3 text-left ring-1 transition-colors active:scale-[0.98] ${qty ? 'ring-2 ring-brand-600' : 'ring-line hover:ring-brand-600'}`}
+                  >
+                    <span className="text-sm font-medium leading-snug text-ink">{p.name}</span>
+                    <span className="mt-2 text-base font-semibold tabular-nums text-brand-700">{formatBRL(p.priceCents)}</span>
+                    {qty > 0 && (
+                      <span className="absolute right-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-brand-600 px-1.5 text-xs font-bold text-white">{qty}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <Card className="h-fit lg:sticky lg:top-6">
+            <CardBody className="flex flex-col gap-4">
+              {alerts}
+              {posField}
+              <div>
+                <p className="text-sm font-medium text-ink">Carrinho</p>
+                {cartLines.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-500">Toque nos produtos para adicionar.</p>
+                ) : (
+                  <ul className="mt-2 divide-y divide-slate-100">
+                    {cartLines.map((l) => (
+                      <li key={l.productId} className="flex items-center gap-2 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm">{l.name}</p>
+                          <p className="text-xs tabular-nums text-slate-500">{formatBRL(l.unitPriceCents * l.quantity)}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button type="button" size="sm" variant="secondary" aria-label={`Tirar um ${l.name}`} onClick={() => setQty(l.productId, l.quantity - 1)}>−</Button>
+                          <span className="w-7 text-center text-sm tabular-nums" aria-live="polite">{l.quantity}</span>
+                          <Button type="button" size="sm" variant="secondary" aria-label={`Adicionar um ${l.name}`} onClick={() => setQty(l.productId, l.quantity + 1)}>+</Button>
+                        </div>
+                      </li>
                     ))}
-                  </Select>
+                  </ul>
                 )}
-              </Field>
+              </div>
+              <div className="flex items-baseline justify-between border-t border-line pt-3">
+                <span className="text-sm text-slate-600">Total</span>
+                <span className="text-3xl font-semibold tabular-nums">{formatBRL(cartTotal)}</span>
+              </div>
+              <Button type="submit" size="lg" loading={submitting} disabled={!cartTotal || !selected?.orderReady}>
+                Cobrar {cartTotal ? formatBRL(cartTotal) : ''}
+              </Button>
+              {cartLines.length > 0 && (
+                <button type="button" onClick={() => setCart({})} className="text-sm text-slate-500 underline-offset-2 hover:underline">
+                  Limpar carrinho
+                </button>
+              )}
+            </CardBody>
+          </Card>
+        </form>
+      ) : (
+        <Card className="mx-auto max-w-xl">
+          <CardBody>
+            <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
+              {alerts}
+              {posField}
               <Field label="Valor">
-                {(p) => <MoneyInput {...p} autoFocus valueCents={amount} onChange={setAmount} />}
+                {(p) => <MoneyInput {...p} key={amountKey} autoFocus valueCents={amount} onChange={setAmount} />}
               </Field>
+              <div className="flex flex-wrap gap-2" aria-label="Valores rápidos">
+                {QUICK_VALUES.map((v) => (
+                  <Button key={v} type="button" size="sm" variant={amount === v ? 'primary' : 'secondary'} onClick={() => pickAmount(v)}>
+                    {formatBRL(v).replace(',00', '')}
+                  </Button>
+                ))}
+                {lastAmount && !QUICK_VALUES.includes(lastAmount) && (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => pickAmount(lastAmount)}>
+                    Repetir {formatBRL(lastAmount)}
+                  </Button>
+                )}
+              </div>
               <Field label="Descrição (opcional)" hint="Aparece para o cliente na página de pagamento.">
                 {(p) => <Input {...p} maxLength={140} value={description} onChange={(e) => setDescription(e.target.value)} />}
               </Field>
@@ -226,10 +433,15 @@ export default function NewChargePage() {
                   Página pública deste POS: <a href={selected.publicUrl} target="_blank" rel="noreferrer" className="text-brand-700 underline">{selected.publicUrl}</a>
                 </p>
               )}
+              {!hasCatalog && can('products:manage') && (
+                <p className="text-center text-xs text-slate-500">
+                  Vende sempre os mesmos itens? <Link href="/app/produtos" className="text-brand-700 underline">Cadastre produtos</Link> para cobrar com poucos toques.
+                </p>
+              )}
             </form>
-          )}
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
+      )}
     </>
   );
 }

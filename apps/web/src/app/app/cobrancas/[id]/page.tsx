@@ -44,6 +44,7 @@ interface Detail {
     refundedAt: string | null;
   }>;
   events: Array<{ previousState: string | null; newState: string; reason: string | null; occurredAt: string }>;
+  items: Array<{ name: string; unitPriceCents: number; quantity: number }>;
 }
 
 export default function ChargeDetailPage() {
@@ -123,6 +124,24 @@ export default function ChargeDetailPage() {
                 </>
               )}
             </dl>
+            {data.items.length > 0 && (
+              <table className="mt-5 w-full text-sm">
+                <caption className="mb-2 text-left font-medium text-ink">Itens vendidos</caption>
+                <thead className="text-slate-500">
+                  <tr><th className="py-1 text-left font-normal">Produto</th><th className="py-1 text-right font-normal">Qtde</th><th className="py-1 text-right font-normal">Unitário</th><th className="py-1 text-right font-normal">Total</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.items.map((i, idx) => (
+                    <tr key={idx}>
+                      <td className="py-1.5">{i.name}</td>
+                      <td className="py-1.5 text-right tabular-nums">{i.quantity}</td>
+                      <td className="py-1.5 text-right"><Money cents={i.unitPriceCents} /></td>
+                      <td className="py-1.5 text-right"><Money cents={i.unitPriceCents * i.quantity} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             {data.status === 'RECONCILING' && (
               <Alert tone="warning" className="mt-4" title="Em conciliação">
                 Motivo: {data.statusReason}. A cobrança só será marcada como paga após validação completa da Order no Mercado Pago.
