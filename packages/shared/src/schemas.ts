@@ -165,7 +165,31 @@ export const createChargeSchema = z.object({
     .max(50)
     .refine((a) => new Set(a.map((i) => i.productId)).size === a.length, 'Produto repetido no carrinho')
     .optional(),
+  /** Fidelidade: cliente identificado no caixa e, opcionalmente, um código de cashback como desconto. */
+  loyalty: z
+    .object({
+      customerId: uuid,
+      rewardCode: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{6}$/, 'Código inválido').optional(),
+    })
+    .optional(),
 });
+
+export const loyaltyCustomerSchema = z.object({
+  name: z.string().trim().min(2, 'Informe o nome').max(80),
+  phone: z
+    .string()
+    .trim()
+    .max(30)
+    .transform((v, ctx) => {
+      const n = normalizeBrWhatsApp(v);
+      if (!n) ctx.addIssue({ code: 'custom', message: 'Informe um WhatsApp com DDD, ex.: (11) 98765-4321' });
+      return n ?? '';
+    }),
+  /** Consentimento do cliente para receber os códigos pelo WhatsApp (LGPD). */
+  whatsappOptIn: z.boolean().default(false),
+});
+export const loyaltyCustomerUpdateSchema = loyaltyCustomerSchema.pick({ name: true, whatsappOptIn: true }).partial();
+export const redeemRewardSchema = z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{6}$/, 'Código inválido') });
 
 export const productInputSchema = z.object({
   name: z.string().trim().min(1, 'Informe o nome').max(80),
@@ -246,6 +270,12 @@ export const tenantSettingsSchema = z.object({
     .nullable()
     .optional(),
   dailyReportHour: z.number().int().min(0).max(23).optional(),
+  /** Fidelidade da loja. */
+  loyaltyMode: z.enum(['OFF', 'CASHBACK', 'GIFT']).optional(),
+  loyaltyCashbackBps: z.number().int().min(1).max(5000).optional(),
+  loyaltyGiftEvery: z.number().int().min(2).max(100).optional(),
+  loyaltyGiftName: z.string().trim().max(60).nullable().optional(),
+  loyaltyMinPurchaseCents: z.number().int().min(0).max(MAX_CHARGE_CENTS).optional(),
 });
 
 export const adminTenantActionSchema = z.object({

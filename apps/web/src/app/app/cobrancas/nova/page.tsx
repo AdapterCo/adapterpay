@@ -6,6 +6,7 @@ import { cartDescription, cartTotalCents, formatBRL, MAX_CHARGE_CENTS } from '@a
 import { Alert, Button, Card, CardBody, Field, Input, PageHeader, Select, Spinner } from '@adapterpay/ui';
 import { ChargeStatusBadge, CopyButton, Countdown, MoneyInput, QrImage } from '@/components/domain';
 import { api, ApiError, errorMessage, newIdempotencyKey } from '@/lib/api';
+import { LoyaltyPanel, type LoyaltyConfig, type LoyaltyCustomer, type LoyaltyReward } from '@/components/loyalty-panel';
 import { formatDateTime } from '@/lib/format';
 import { useApi, useNow, useServerOffset } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
@@ -90,6 +91,11 @@ export default function NewChargePage() {
   const [category, setCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
 
+  const loyaltyConfig = useApi<LoyaltyConfig>(can('loyalty:use') ? '/loyalty/config' : null);
+  const loyaltyOn = !!loyaltyConfig.data && loyaltyConfig.data.mode !== 'OFF';
+  const [loyaltyCustomer, setLoyaltyCustomer] = useState<LoyaltyCustomer | null>(null);
+  const [appliedReward, setAppliedReward] = useState<LoyaltyReward | null>(null);
+
   useEffect(() => {
     api<PosItem[]>('/pos')
       .then((items) => {
@@ -146,7 +152,9 @@ export default function NewChargePage() {
     [catalog, cart],
   );
   const cartTotal = cartTotalCents(cartLines);
-  const chargeAmount = mode === 'catalog' ? cartTotal : amount;
+  const grossAmount = mode === 'catalog' ? cartTotal : amount;
+  const discount = appliedReward?.valueCents ?? 0;
+  const chargeAmount = grossAmount ? grossAmount - discount : grossAmount;
 
   const setQty = (id: string, qty: number) => setCart((c) => {
     const next = { ...c };
@@ -165,15 +173,19 @@ export default function NewChargePage() {
     setError(null);
     setBusy(null);
     if (!posId) return setError('Selecione um POS');
-    if (!chargeAmount || chargeAmount <= 0 || chargeAmount > MAX_CHARGE_CENTS) {
+    if (!grossAmount || grossAmount <= 0 || grossAmount > MAX_CHARGE_CENTS) {
       return setError(mode === 'catalog' ? 'Adicione produtos ao carrinho' : 'Informe um valor válido');
     }
+    if (!chargeAmount || chargeAmount <= 0) return setError('O cashback vale mais que esta compra. Use o código numa compra maior.');
     setSubmitting(true);
     try {
+      const loyalty = loyaltyCustomer
+        ? { loyalty: { customerId: loyaltyCustomer.id, ...(appliedReward ? { rewardCode: appliedReward.code } : {}) } }
+        : {};
       const body =
         mode === 'catalog'
-          ? { posId, amountCents: cartTotal, items: cartLines.map((l) => ({ productId: l.productId, quantity: l.quantity })) }
-          : { posId, amountCents: chargeAmount, ...(description.trim() ? { description: description.trim() } : {}) };
+          ? { posId, amountCents: chargeAmount, items: cartLines.map((l) => ({ productId: l.productId, quantity: l.quantity })), ...loyalty }
+          : { posId, amountCents: chargeAmount, ...(description.trim() ? { description: description.trim() } : {}), ...loyalty };
       const created = await api<ChargeDetail>('/charges', { method: 'POST', body, headers: { 'Idempotency-Key': idemKey.current } });
       writeStorage(LAST_POS_KEY, posId);
       if (mode === 'amount') {
@@ -200,8 +212,20 @@ export default function NewChargePage() {
     setAmountKey((k) => k + 1);
     setDescription('');
     setCart({});
+    setLoyaltyCustomer(null);
+    setAppliedReward(null);
     idemKey.current = newIdempotencyKey();
   };
+
+  const loyaltyPanel = loyaltyOn && loyaltyConfig.data && (
+    <LoyaltyPanel
+      config={loyaltyConfig.data}
+      customer={loyaltyCustomer}
+      appliedCode={appliedReward?.code ?? null}
+      onCustomer={setLoyaltyCustomer}
+      onApply={setAppliedReward}
+    />
+  );
 
   if (charge) {
     const live = charge.status === 'PENDING' && charge.expiresAt && new Date(charge.expiresAt).getTime() > now + offset;
@@ -386,12 +410,19 @@ export default function NewChargePage() {
                   </ul>
                 )}
               </div>
+              {loyaltyPanel}
+              {discount > 0 && (
+                <div className="flex justify-between text-sm text-slate-600">
+                  <span>Desconto cashback</span>
+                  <span className="tabular-nums">− {formatBRL(discount)}</span>
+                </div>
+              )}
               <div className="flex items-baseline justify-between border-t border-line pt-3">
                 <span className="text-sm text-slate-600">Total</span>
-                <span className="text-3xl font-semibold tabular-nums">{formatBRL(cartTotal)}</span>
+                <span className="text-3xl font-semibold tabular-nums">{formatBRL(cartTotal ? chargeAmount : 0)}</span>
               </div>
               <Button type="submit" size="lg" loading={submitting} disabled={!cartTotal || !selected?.orderReady}>
-                Cobrar {cartTotal ? formatBRL(cartTotal) : ''}
+                Cobrar {cartTotal && chargeAmount ? formatBRL(chargeAmount) : ''}
               </Button>
               {cartLines.length > 0 && (
                 <button type="button" onClick={() => setCart({})} className="text-sm text-slate-500 underline-offset-2 hover:underline">
@@ -425,8 +456,14 @@ export default function NewChargePage() {
               <Field label="Descrição (opcional)" hint="Aparece para o cliente na página de pagamento.">
                 {(p) => <Input {...p} maxLength={140} value={description} onChange={(e) => setDescription(e.target.value)} />}
               </Field>
+              {loyaltyPanel}
+              {discount > 0 && amount ? (
+                <p className="text-sm text-slate-600">
+                  {formatBRL(amount)} − cashback {formatBRL(discount)} = <strong className="tabular-nums">{formatBRL(Math.max(0, amount - discount))}</strong>
+                </p>
+              ) : null}
               <Button type="submit" size="lg" loading={submitting} disabled={!amount || !selected?.orderReady}>
-                Gerar cobrança {amount ? formatBRL(amount) : ''}
+                Gerar cobrança {chargeAmount && chargeAmount > 0 ? formatBRL(chargeAmount) : ''}
               </Button>
               {selected && (
                 <p className="text-center text-xs text-slate-500">

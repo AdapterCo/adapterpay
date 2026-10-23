@@ -20,6 +20,7 @@ export * from './billing/billing-service';
 export * from './billing/periods';
 export * from './whatsapp/evolution';
 export * from './reports/daily-closing';
+export * from './loyalty/loyalty';
 
 export const QUEUES = {
   charges: 'charges',

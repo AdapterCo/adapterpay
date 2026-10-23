@@ -133,6 +133,14 @@ model Tenant {
   dailyReportPhone   String? @map("daily_report_phone")
   /// Hora local (fuso do tenant) do envio, 0–23
   dailyReportHour    Int     @default(22) @map("daily_report_hour")
+  /// Fidelidade: OFF | CASHBACK (% de cada compra vira código de desconto) | GIFT (brinde a cada N compras)
+  loyaltyMode             String  @default("OFF") @map("loyalty_mode")
+  /// Cashback em pontos-base (500 = 5%)
+  loyaltyCashbackBps      Int     @default(500) @map("loyalty_cashback_bps")
+  loyaltyGiftEvery        Int     @default(10) @map("loyalty_gift_every")
+  loyaltyGiftName         String? @map("loyalty_gift_name")
+  /// Compra mínima (centavos) para contar na fidelidade
+  loyaltyMinPurchaseCents Int     @default(0) @map("loyalty_min_purchase_cents")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(3)
@@ -149,6 +157,8 @@ model Tenant {
   storeMemberships StoreMembership[]
   dailyReports  DailyReport[]
   products      Product[]
+  loyaltyCustomers LoyaltyCustomer[]
+  loyaltyRewards   LoyaltyReward[]
 
   @@index([status])
   @@index([taxIdHash])
@@ -188,6 +198,58 @@ model ChargeItem {
 
   @@index([chargeId])
   @@map("charge_items")
+}
+
+/// Cliente da fidelidade: só nome e WhatsApp (LGPD: dados mínimos e consentimento para mensagens).
+model LoyaltyCustomer {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  name            String
+  /// WhatsApp só com dígitos e DDI (ex.: 5511987654321)
+  phone           String
+  whatsappOptIn   Boolean  @default(false) @map("whatsapp_opt_in")
+  purchaseCount   Int      @default(0) @map("purchase_count")
+  /// compras acumuladas para o próximo brinde
+  giftProgress    Int      @default(0) @map("gift_progress")
+  totalSpentCents Int      @default(0) @map("total_spent_cents")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id])
+  rewards LoyaltyReward[]
+  charges Charge[]
+
+  @@unique([tenantId, phone])
+  @@map("loyalty_customers")
+}
+
+/// Recompensa com código de uso único: cashback (valor) ou brinde.
+model LoyaltyReward {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  customerId       String    @map("customer_id") @db.Uuid
+  code             String
+  /// CASHBACK | GIFT
+  kind             String
+  valueCents       Int?      @map("value_cents")
+  description      String?
+  /// AVAILABLE | RESERVED | USED | CANCELLED
+  status           String    @default("AVAILABLE")
+  earnedChargeId   String?   @map("earned_charge_id") @db.Uuid
+  reservedChargeId String?   @map("reserved_charge_id") @db.Uuid
+  usedAt           DateTime? @map("used_at") @db.Timestamptz(3)
+  notifiedAt       DateTime? @map("notified_at") @db.Timestamptz(3)
+  notifyAttempts   Int       @default(0) @map("notify_attempts")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  customer LoyaltyCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([customerId, status])
+  @@index([notifiedAt])
+  @@map("loyalty_rewards")
 }
 
 /// Fechamento de caixa diário: uma linha por tenant e dia local garante envio único.
@@ -456,6 +518,12 @@ model Charge {
   payments     Payment[]
   events       PaymentEvent[]
   items        ChargeItem[]
+  loyaltyCustomerId String?          @map("loyalty_customer_id") @db.Uuid
+  /// código de cashback aplicado nesta cobrança (para consumir mesmo em pagamento atrasado)
+  loyaltyRewardId   String?          @map("loyalty_reward_id") @db.Uuid
+  /// desconto de cashback aplicado (valor da cobrança já é o líquido a pagar)
+  discountCents     Int              @default(0) @map("discount_cents")
+  loyaltyCustomer   LoyaltyCustomer? @relation(fields: [loyaltyCustomerId], references: [id], onDelete: SetNull)
   pollingJob   PollingJob?
 
   @@unique([tenantId, clientRequestId])

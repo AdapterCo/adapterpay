@@ -5,7 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { formatBrWhatsApp, parsePercentToBps } from '@adapterpay/shared';
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Checkbox, Field, Input, PageHeader, Select, Spinner } from '@adapterpay/ui';
 import { useCritical } from '@/components/critical';
-import { CopyButton } from '@/components/domain';
+import { CopyButton, MoneyInput } from '@/components/domain';
 import { api, errorMessage } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
@@ -25,6 +25,11 @@ interface Settings {
   dailyReportEnabled: boolean;
   dailyReportPhone: string | null;
   dailyReportHour: number;
+  loyaltyMode: 'OFF' | 'CASHBACK' | 'GIFT';
+  loyaltyCashbackBps: number;
+  loyaltyGiftEvery: number;
+  loyaltyGiftName: string | null;
+  loyaltyMinPurchaseCents: number;
   whatsappAvailable: boolean;
   lastDailyReport: { day: string; status: string; sentAt: string | null; lastError: string | null } | null;
 }
@@ -46,11 +51,13 @@ export default function SettingsPage() {
   const [rates, setRates] = useState({ pos: '', link: '' });
   const [phone, setPhone] = useState('');
   const [testing, setTesting] = useState(false);
+  const [cashbackRate, setCashbackRate] = useState('');
 
   useEffect(() => {
     if (!settings.data) return;
     setForm(settings.data);
     setRates({ pos: bpsToInput(settings.data.savingsPosRateBps), link: bpsToInput(settings.data.savingsLinkRateBps) });
+    setCashbackRate(bpsToInput(settings.data.loyaltyCashbackBps));
     setPhone(formatBrWhatsApp(settings.data.dailyReportPhone));
   }, [settings.data]);
 
@@ -63,6 +70,11 @@ export default function SettingsPage() {
     const linkBps = parsePercentToBps(rates.link);
     if (posBps === null || linkBps === null) {
       setError('Informe as taxas como 0,49 (entre 0 e 20%).');
+      return;
+    }
+    const cashbackBps = parsePercentToBps(cashbackRate);
+    if (form.loyaltyMode === 'CASHBACK' && (!cashbackBps || cashbackBps < 1)) {
+      setError('Informe o percentual de cashback, por exemplo 5.');
       return;
     }
     setSaving(true);
@@ -84,6 +96,11 @@ export default function SettingsPage() {
             dailyReportEnabled: form.dailyReportEnabled,
             dailyReportPhone: phone.trim() ? phone : null,
             dailyReportHour: form.dailyReportHour,
+            loyaltyMode: form.loyaltyMode,
+            ...(cashbackBps ? { loyaltyCashbackBps: cashbackBps } : {}),
+            loyaltyGiftEvery: form.loyaltyGiftEvery,
+            loyaltyGiftName: form.loyaltyGiftName?.trim() || null,
+            loyaltyMinPurchaseCents: form.loyaltyMinPurchaseCents,
           },
         }),
       );
@@ -218,6 +235,49 @@ export default function SettingsPage() {
               )}
             </div>
             {!settings.data?.dailyReportPhone && <p className="text-xs text-slate-500">Salve o número para liberar o envio de teste.</p>}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Fidelidade"
+            description="Recompense quem volta. O cliente é identificado pelo WhatsApp no caixa e recebe um código de uso único."
+          />
+          <CardBody className="flex flex-col gap-3">
+            <Field label="Modalidade">
+              {(p) => (
+                <Select {...p} value={form.loyaltyMode} onChange={(e) => setForm({ ...form, loyaltyMode: e.target.value as Settings['loyaltyMode'] })}>
+                  <option value="OFF">Desligada</option>
+                  <option value="CASHBACK">Cashback: % de cada compra vira desconto na próxima</option>
+                  <option value="GIFT">Brinde: a cada N compras o cliente ganha um brinde</option>
+                </Select>
+              )}
+            </Field>
+            {form.loyaltyMode === 'CASHBACK' && (
+              <Field label="Cashback (%)" hint="Ex.: 5 = R$ 2,50 de cashback numa compra de R$ 50,00.">
+                {(p) => <Input {...p} inputMode="decimal" value={cashbackRate} onChange={(e) => setCashbackRate(e.target.value)} />}
+              </Field>
+            )}
+            {form.loyaltyMode === 'GIFT' && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="A cada quantas compras">
+                  {(p) => (
+                    <Input {...p} type="number" min={2} max={100} value={form.loyaltyGiftEvery} onChange={(e) => setForm({ ...form, loyaltyGiftEvery: Math.max(2, Math.min(100, Number(e.target.value) || 2)) })} />
+                  )}
+                </Field>
+                <Field label="Brinde">
+                  {(p) => <Input {...p} maxLength={60} placeholder="1 café grátis" value={form.loyaltyGiftName ?? ''} onChange={(e) => setForm({ ...form, loyaltyGiftName: e.target.value })} />}
+                </Field>
+              </div>
+            )}
+            {form.loyaltyMode !== 'OFF' && (
+              <Field label="Compra mínima para contar (opcional)">
+                {(p) => <MoneyInput {...p} valueCents={form.loyaltyMinPurchaseCents || null} onChange={(c) => setForm({ ...form, loyaltyMinPurchaseCents: c ?? 0 })} />}
+              </Field>
+            )}
+            {form.loyaltyMode !== 'OFF' && !form.whatsappAvailable && (
+              <p className="text-xs text-slate-500">O envio dos códigos por WhatsApp ainda não está ativo; o vendedor vê os códigos na tela de cobrança.</p>
+            )}
           </CardBody>
         </Card>
 

@@ -7,6 +7,7 @@ import {
   type OrderDecision,
 } from '@adapterpay/shared';
 import type { EventPublisher } from '../events';
+import { applyLoyaltyOnTransition } from '../loyalty/loyalty';
 import { createNotification } from '../notifications';
 import { redactPayload } from '../redact';
 
@@ -128,6 +129,9 @@ export async function applyChargeTransition(
     }
 
     await tx.charge.update({ where: { id: charge.id }, data });
+
+    // Fidelidade: consome/libera o código aplicado e credita cashback ou brinde, na mesma transação.
+    await applyLoyaltyOnTransition(tx, charge, previous, target);
 
     if (POS_RELEASING_STATUSES.includes(target)) {
       // Libera o POS somente se ele ainda aponta para esta cobrança.

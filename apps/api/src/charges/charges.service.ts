@@ -77,6 +77,26 @@ export class ChargesService {
       throw new AppError(409, ERROR_CODES.MP_RECONNECT_REQUIRED, 'A conta Mercado Pago deste POS precisa ser reconectada');
     }
 
+    // Fidelidade: cliente identificado no caixa e, opcionalmente, um código de cashback como desconto.
+    let loyaltyCustomerId: string | null = null;
+    let reward: { id: string; valueCents: number } | null = null;
+    if (input.loyalty) {
+      const tenant = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { loyaltyMode: true } });
+      if (tenant.loyaltyMode === 'OFF') throw Errors.validation('A fidelidade está desligada nas configurações');
+      const customer = await this.deps.prisma.loyaltyCustomer.findFirst({ where: { id: input.loyalty.customerId, tenantId }, select: { id: true } });
+      if (!customer) throw Errors.notFound('Cliente');
+      loyaltyCustomerId = customer.id;
+      if (input.loyalty.rewardCode) {
+        const r = await this.deps.prisma.loyaltyReward.findFirst({
+          where: { tenantId, customerId: customer.id, code: input.loyalty.rewardCode, kind: 'CASHBACK', status: 'AVAILABLE' },
+          select: { id: true, valueCents: true },
+        });
+        if (!r?.valueCents) throw Errors.validation('Código de cashback inválido ou já usado');
+        reward = { id: r.id, valueCents: r.valueCents };
+      }
+    }
+    const discount = reward?.valueCents ?? 0;
+
     // Carrinho do catálogo: preços SEMPRE do servidor; o total enviado precisa bater com o recalculado.
     let lines: Array<CartLine & { productId: string }> = [];
     if (input.items?.length) {
@@ -94,8 +114,9 @@ export class ChargesService {
       });
       const total = cartTotalCents(lines);
       if (total > MAX_CHARGE_CENTS) throw Errors.validation('Total do carrinho acima do limite por cobrança');
-      if (total !== input.amountCents) {
-        throw new AppError(409, ERROR_CODES.CONFLICT, 'Os preços do catálogo mudaram. Confira o total e gere a cobrança de novo.', { amountCents: total });
+      if (discount >= total) throw Errors.validation('O cashback vale mais que esta compra. Use o código numa compra maior.');
+      if (total - discount !== input.amountCents) {
+        throw new AppError(409, ERROR_CODES.CONFLICT, 'Os preços do catálogo mudaram. Confira o total e gere a cobrança de novo.', { amountCents: total - discount });
       }
     }
     const description = input.description || (lines.length ? cartDescription(lines) : null);
@@ -125,8 +146,19 @@ export class ChargesService {
             description,
             status: 'CREATING',
             publicToken: randomToken(24),
+            loyaltyCustomerId,
+            loyaltyRewardId: reward?.id ?? null,
+            discountCents: discount,
           },
         });
+        if (reward) {
+          // Reserva o código para esta cobrança; volta a ficar disponível se ela não for paga.
+          const reserved = await tx.loyaltyReward.updateMany({
+            where: { id: reward.id, status: 'AVAILABLE' },
+            data: { status: 'RESERVED', reservedChargeId: charge.id },
+          });
+          if (reserved.count !== 1) throw Errors.conflict('Este código de cashback acabou de ser usado em outra cobrança');
+        }
         if (lines.length) {
           await tx.chargeItem.createMany({
             data: lines.map((l) => ({ chargeId: charge.id, productId: l.productId, name: l.name, unitPriceCents: l.unitPriceCents, quantity: l.quantity })),
@@ -292,6 +324,7 @@ export class ChargesService {
         payments: true,
         events: { orderBy: { occurredAt: 'asc' }, select: { previousState: true, newState: true, reason: true, occurredAt: true } },
         items: { select: { name: true, unitPriceCents: true, quantity: true } },
+        loyaltyCustomer: { select: { name: true } },
       },
     });
     if (!c) throw Errors.notFound('Cobrança');
@@ -335,6 +368,8 @@ export class ChargesService {
       })),
       events: c.events,
       items: c.items,
+      discountCents: c.discountCents,
+      loyaltyCustomerName: c.loyaltyCustomer?.name ?? null,
     };
   }
 

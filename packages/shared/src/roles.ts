@@ -26,7 +26,9 @@ export type Permission =
   | 'settings:manage'
   | 'audit:read'
   | 'products:manage'
-  | 'products:read';
+  | 'products:read'
+  | 'loyalty:manage'
+  | 'loyalty:use';
 
 const MATRIX: Record<TenantRole, readonly Permission[]> = {
   ADMIN: [
@@ -48,8 +50,10 @@ const MATRIX: Record<TenantRole, readonly Permission[]> = {
     'audit:read',
     'products:manage',
     'products:read',
+    'loyalty:manage',
+    'loyalty:use',
   ],
-  VENDEDOR: ['charges:create', 'charges:read', 'charges:cancel', 'stores:read', 'pos:read', 'products:read'],
+  VENDEDOR: ['charges:create', 'charges:read', 'charges:cancel', 'stores:read', 'pos:read', 'products:read', 'loyalty:use'],
   CONTADOR: ['charges:read', 'reports:read', 'reports:export', 'stores:read'],
 };
 

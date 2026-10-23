@@ -40,6 +40,11 @@ export class TenantsController {
       dailyReportEnabled: t.dailyReportEnabled,
       dailyReportPhone: t.dailyReportPhone,
       dailyReportHour: t.dailyReportHour,
+      loyaltyMode: t.loyaltyMode,
+      loyaltyCashbackBps: t.loyaltyCashbackBps,
+      loyaltyGiftEvery: t.loyaltyGiftEvery,
+      loyaltyGiftName: t.loyaltyGiftName,
+      loyaltyMinPurchaseCents: t.loyaltyMinPurchaseCents,
       whatsappAvailable: isWhatsAppConfigured(this.deps.config),
       lastDailyReport: await this.deps.prisma.dailyReport.findFirst({
         where: { tenantId: t.id },

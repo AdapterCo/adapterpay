@@ -45,6 +45,8 @@ interface Detail {
   }>;
   events: Array<{ previousState: string | null; newState: string; reason: string | null; occurredAt: string }>;
   items: Array<{ name: string; unitPriceCents: number; quantity: number }>;
+  discountCents: number;
+  loyaltyCustomerName: string | null;
 }
 
 export default function ChargeDetailPage() {
@@ -110,6 +112,8 @@ export default function ChargeDetailPage() {
               <div><dt className="text-slate-500">Pago em</dt><dd>{formatDateTime(data.paidAt)}</dd></div>
               <div><dt className="text-slate-500">Vendedor</dt><dd>{data.seller.name}</dd></div>
               <div><dt className="text-slate-500">Descrição</dt><dd>{data.description ?? '—'}</dd></div>
+              {data.loyaltyCustomerName && <div><dt className="text-slate-500">Cliente (fidelidade)</dt><dd>{data.loyaltyCustomerName}</dd></div>}
+              {data.discountCents > 0 && <div><dt className="text-slate-500">Desconto de cashback</dt><dd><Money cents={data.discountCents} /></dd></div>}
               <div><dt className="text-slate-500">Referência</dt><dd className="font-mono text-xs">{data.externalReference}</dd></div>
               <div><dt className="text-slate-500">Order ID (Mercado Pago)</dt><dd className="font-mono text-xs">{data.orderId ?? '—'}</dd></div>
               <div><dt className="text-slate-500">Payment ID</dt><dd className="font-mono text-xs">{payment?.mpPaymentId ?? data.mpPaymentId ?? '—'}</dd></div>
