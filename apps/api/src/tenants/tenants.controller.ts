@@ -1,10 +1,11 @@
 import { Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { writeAudit, type CoreDeps } from '@adapterpay/core';
-import { tenantSettingsSchema } from '@adapterpay/shared';
+import { isWhatsAppConfigured, sendDailyClosingTest, WhatsAppError, writeAudit, type CoreDeps } from '@adapterpay/core';
+import { ERROR_CODES, tenantSettingsSchema } from '@adapterpay/shared';
 import type { z } from 'zod';
 import { Critical, RequirePermission } from '../auth/decorators';
-import { Errors } from '../common/errors';
+import { AppError, Errors } from '../common/errors';
+import { RateLimit } from '../common/rate-limit';
 import { CurrentAuth, Meta, requireTenant, type AuthContext, type RequestMeta } from '../common/request';
 import { CORE } from '../common/tokens';
 import { ApiZodBody, ZBody } from '../common/zod';
@@ -34,7 +35,38 @@ export class TenantsController {
       allowSellerCancel: t.allowSellerCancel,
       requireAdminMfa: t.requireAdminMfa,
       status: t.status,
+      savingsPosRateBps: t.savingsPosRateBps,
+      savingsLinkRateBps: t.savingsLinkRateBps,
+      dailyReportEnabled: t.dailyReportEnabled,
+      dailyReportPhone: t.dailyReportPhone,
+      dailyReportHour: t.dailyReportHour,
+      whatsappAvailable: isWhatsAppConfigured(this.deps.config),
+      lastDailyReport: await this.deps.prisma.dailyReport.findFirst({
+        where: { tenantId: t.id },
+        orderBy: { createdAt: 'desc' },
+        select: { day: true, status: true, sentAt: true, lastError: true },
+      }),
     };
+  }
+
+  /** Envia agora o fechamento do dia (parcial) para o WhatsApp salvo, para conferir o formato. */
+  @Post('settings/daily-report/test')
+  @HttpCode(204)
+  @RequirePermission('settings:manage')
+  @RateLimit({ key: 'daily-report-test', limit: 5, windowSec: 600, by: 'user' })
+  async testDailyReport(@CurrentAuth() auth: AuthContext): Promise<void> {
+    const tenantId = requireTenant(auth);
+    if (!isWhatsAppConfigured(this.deps.config)) throw Errors.validation('Envio por WhatsApp indisponível no momento. Avise o suporte da Adapter Co.');
+    const t = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { dailyReportPhone: true } });
+    if (!t.dailyReportPhone) throw Errors.validation('Salve um número de WhatsApp antes de enviar o teste');
+    try {
+      await sendDailyClosingTest(this.deps, tenantId, t.dailyReportPhone);
+    } catch (err) {
+      if (err instanceof WhatsAppError) {
+        throw new AppError(502, ERROR_CODES.INTERNAL, 'Não foi possível enviar pelo WhatsApp. Confira o número e tente de novo.');
+      }
+      throw err;
+    }
   }
 
   @Patch('settings')
@@ -51,6 +83,10 @@ export class TenantsController {
       throw Errors.validation('Ative o MFA na sua conta antes de exigir MFA dos administradores');
     }
     const before = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const phone = body.dailyReportPhone === undefined ? before.dailyReportPhone : body.dailyReportPhone;
+    if ((body.dailyReportEnabled ?? before.dailyReportEnabled) && !phone) {
+      throw Errors.validation('Informe o WhatsApp que vai receber o fechamento de caixa');
+    }
     const after = await this.deps.prisma.tenant.update({ where: { id: tenantId }, data: body });
     await writeAudit(this.deps.prisma, {
       tenantId,

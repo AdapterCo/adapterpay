@@ -1,7 +1,7 @@
 import type { PrismaClient, TxClient } from '@adapterpay/database';
 import type { EventPublisher } from './events';
 
-/** Notificações exclusivamente no painel (seção 1 — sem WhatsApp ou APIs de mensagem). */
+/** Notificações do painel. O único envio externo é o fechamento de caixa diário por WhatsApp (reports/daily-closing). */
 export async function createNotification(
   db: PrismaClient | TxClient,
   events: EventPublisher | null,

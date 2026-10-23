@@ -1,5 +1,6 @@
 import type { Queue } from 'bullmq';
 import {
+  runDailyReports,
   syncPaymentFees,
   syncPos,
   WORKER_HEARTBEAT_KEY,
@@ -17,6 +18,7 @@ export type MaintenanceJobName =
   | 'pos-sync'
   | 'token-refresh'
   | 'key-rotation'
+  | 'daily-report'
   | 'cleanup';
 
 interface Ctx {
@@ -38,6 +40,7 @@ export async function registerSchedulers(queue: Queue): Promise<void> {
     ['fee-sync', 120_000],
     ['token-refresh', 3_600_000],
     ['pos-sync', 3_600_000],
+    ['daily-report', 300_000],
     ['key-rotation', 86_400_000],
     ['cleanup', 86_400_000],
   ];
@@ -175,6 +178,10 @@ export async function runMaintenance(name: MaintenanceJobName, ctx: Ctx): Promis
       }
       return { rotated };
     }
+
+    case 'daily-report':
+      // Fechamento de caixa por WhatsApp no horário escolhido por cada empresa (envio único por dia).
+      return runDailyReports(deps);
 
     case 'cleanup': {
       const now = new Date();

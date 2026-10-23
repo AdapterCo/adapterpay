@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect } from 'react';
-import { formatBRL } from '@adapterpay/shared';
+import { formatBps, formatBRL } from '@adapterpay/shared';
 import { Alert, Button, Card, CardBody, CardHeader, EmptyState, PageHeader, Spinner, Stat, Table, Td, Th } from '@adapterpay/ui';
 import { useApi } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
@@ -18,6 +18,18 @@ interface Dashboard {
     activeCharges: number;
     expiredToday: number;
     reconciling: number;
+  };
+  savingsMonth: {
+    grossCents: number;
+    paidFeeCents: number;
+    posFeeCents: number;
+    linkFeeCents: number;
+    savedVsPosCents: number;
+    savedVsLinkCents: number;
+    paidCount: number;
+    feeUnknownCount: number;
+    posRateBps: number;
+    linkRateBps: number;
   };
   last30Days: {
     byStore: Array<{ id: string; name: string; paidCount: number; grossCents: number }>;
@@ -106,6 +118,8 @@ export default function DashboardPage() {
             <Stat label="Em conciliação" value={dash.data.today.reconciling} tone={dash.data.today.reconciling > 0 ? 'warning' : 'default'} hint="Aguardando confirmação segura" />
           </div>
 
+          {me?.role !== 'VENDEDOR' && dash.data.savingsMonth.paidCount > 0 && <SavingsCard s={dash.data.savingsMonth} />}
+
           <Card className="mt-6">
             <CardHeader title="Recebimentos — últimos 30 dias" />
             <CardBody>
@@ -152,5 +166,39 @@ export default function DashboardPage() {
         </>
       )}
     </>
+  );
+}
+
+/** Economia do mês: tarifa real paga nos Pix do AdapterPay contra Pix na maquininha e por link. */
+function SavingsCard({ s }: { s: Dashboard['savingsMonth'] }) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-2xl bg-ink text-white" aria-labelledby="economia-titulo">
+      <div className="grid gap-6 p-6 sm:grid-cols-[1.2fr_1fr] sm:items-center">
+        <div>
+          <h2 id="economia-titulo" className="text-sm text-white/70">Quanto você economizou este mês</h2>
+          <p className="mt-1 text-4xl font-semibold tracking-tight tabular-nums text-emerald-300">{formatBRL(s.savedVsPosCents)}</p>
+          <p className="mt-2 max-w-md text-sm text-white/75">
+            Comparado ao Pix na maquininha ({formatBps(s.posRateBps)}), em {formatBRL(s.grossCents)} recebidos em {s.paidCount} vendas.
+          </p>
+        </div>
+        <dl className="grid gap-2 text-sm">
+          <div className="flex justify-between gap-4 rounded-lg bg-white/5 px-3 py-2">
+            <dt className="text-white/70">Tarifa paga no AdapterPay</dt>
+            <dd className="tabular-nums">{formatBRL(s.paidFeeCents)}</dd>
+          </div>
+          <div className="flex justify-between gap-4 rounded-lg bg-white/5 px-3 py-2">
+            <dt className="text-white/70">Pix na maquininha ({formatBps(s.posRateBps)})</dt>
+            <dd className="tabular-nums">{formatBRL(s.posFeeCents)}</dd>
+          </div>
+          <div className="flex justify-between gap-4 rounded-lg bg-white/5 px-3 py-2">
+            <dt className="text-white/70">Pix por link ({formatBps(s.linkRateBps)})</dt>
+            <dd className="tabular-nums">{formatBRL(s.linkFeeCents)} · economia {formatBRL(s.savedVsLinkCents)}</dd>
+          </div>
+          {s.feeUnknownCount > 0 && (
+            <p className="text-xs text-white/60">{s.feeUnknownCount} pagamento(s) ainda sem tarifa informada pelo Mercado Pago.</p>
+          )}
+        </dl>
+      </div>
+    </section>
   );
 }

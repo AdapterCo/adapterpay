@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
+import { formatBrWhatsApp, parsePercentToBps } from '@adapterpay/shared';
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Checkbox, Field, Input, PageHeader, Select, Spinner } from '@adapterpay/ui';
 import { useCritical } from '@/components/critical';
 import { CopyButton } from '@/components/domain';
@@ -19,7 +20,17 @@ interface Settings {
   fiscalAddress: string | null;
   allowSellerCancel: boolean;
   requireAdminMfa: boolean;
+  savingsPosRateBps: number;
+  savingsLinkRateBps: number;
+  dailyReportEnabled: boolean;
+  dailyReportPhone: string | null;
+  dailyReportHour: number;
+  whatsappAvailable: boolean;
+  lastDailyReport: { day: string; status: string; sentAt: string | null; lastError: string | null } | null;
 }
+
+const bpsToInput = (bps: number) => (bps / 100).toFixed(2).replace('.', ',');
+const REPORT_STATUS: Record<string, string> = { SENT: 'enviado', FAILED: 'falhou', PENDING: 'enviando' };
 
 const TIMEZONES = ['America/Sao_Paulo', 'America/Manaus', 'America/Cuiaba', 'America/Belem', 'America/Fortaleza', 'America/Recife', 'America/Bahia', 'America/Rio_Branco', 'America/Noronha'];
 
@@ -32,17 +43,29 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [codes, setCodes] = useState<string[] | null>(null);
+  const [rates, setRates] = useState({ pos: '', link: '' });
+  const [phone, setPhone] = useState('');
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    if (settings.data) setForm(settings.data);
+    if (!settings.data) return;
+    setForm(settings.data);
+    setRates({ pos: bpsToInput(settings.data.savingsPosRateBps), link: bpsToInput(settings.data.savingsLinkRateBps) });
+    setPhone(formatBrWhatsApp(settings.data.dailyReportPhone));
   }, [settings.data]);
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
     if (!form) return;
-    setSaving(true);
     setError(null);
     setMsg(null);
+    const posBps = parsePercentToBps(rates.pos);
+    const linkBps = parsePercentToBps(rates.link);
+    if (posBps === null || linkBps === null) {
+      setError('Informe as taxas como 0,49 (entre 0 e 20%).');
+      return;
+    }
+    setSaving(true);
     try {
       await critical(() =>
         api('/settings', {
@@ -56,6 +79,11 @@ export default function SettingsPage() {
             fiscalAddress: form.fiscalAddress || null,
             allowSellerCancel: form.allowSellerCancel,
             requireAdminMfa: form.requireAdminMfa,
+            savingsPosRateBps: posBps,
+            savingsLinkRateBps: linkBps,
+            dailyReportEnabled: form.dailyReportEnabled,
+            dailyReportPhone: phone.trim() ? phone : null,
+            dailyReportHour: form.dailyReportHour,
           },
         }),
       );
@@ -81,6 +109,20 @@ export default function SettingsPage() {
       URL.revokeObjectURL(url);
     } catch (err) {
       setError(errorMessage(err));
+    }
+  };
+
+  const sendTest = async () => {
+    setError(null);
+    setMsg(null);
+    setTesting(true);
+    try {
+      await api('/settings/daily-report/test', { method: 'POST' });
+      setMsg('Fechamento de teste enviado. Confira o WhatsApp.');
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -138,6 +180,59 @@ export default function SettingsPage() {
           <CardHeader title="Operação" />
           <CardBody className="flex flex-col gap-3">
             <Checkbox checked={form.allowSellerCancel} onChange={(e) => setForm({ ...form, allowSellerCancel: e.target.checked })} label="Permitir que vendedores cancelem as próprias cobranças pendentes (somente se o Mercado Pago confirmar o cancelamento)" />
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Fechamento de caixa no WhatsApp"
+            description="Resumo do dia por caixa e por vendedor: total, quantidade, ticket médio e economia."
+          />
+          <CardBody className="flex flex-col gap-3">
+            {!form.whatsappAvailable && (
+              <Alert tone="warning">O envio por WhatsApp ainda não está ativo na plataforma. Avise o suporte da Adapter Co.</Alert>
+            )}
+            <Checkbox
+              checked={form.dailyReportEnabled}
+              onChange={(e) => setForm({ ...form, dailyReportEnabled: e.target.checked })}
+              label="Enviar o fechamento automaticamente todo dia"
+            />
+            <Field label="WhatsApp que recebe" hint="Com DDD. Ex.: (11) 98765-4321">
+              {(p) => <Input {...p} type="tel" inputMode="tel" autoComplete="tel" placeholder="(11) 98765-4321" value={phone} onChange={(e) => setPhone(e.target.value)} />}
+            </Field>
+            <Field label="Horário do envio" hint="Até 5h, o resumo é do dia anterior inteiro. A partir de 6h, é do dia até o horário do envio.">
+              {(p) => (
+                <Select {...p} value={form.dailyReportHour} onChange={(e) => setForm({ ...form, dailyReportHour: Number(e.target.value) })}>
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                </Select>
+              )}
+            </Field>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" variant="secondary" loading={testing} disabled={!form.whatsappAvailable || !settings.data?.dailyReportPhone} onClick={sendTest}>
+                Enviar teste agora
+              </Button>
+              {form.lastDailyReport && (
+                <span className="text-xs text-slate-500">
+                  Último fechamento: {form.lastDailyReport.day.split('-').reverse().join('/')} · {REPORT_STATUS[form.lastDailyReport.status] ?? form.lastDailyReport.status}
+                </span>
+              )}
+            </div>
+            {!settings.data?.dailyReportPhone && <p className="text-xs text-slate-500">Salve o número para liberar o envio de teste.</p>}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Quanto você economizou"
+            description="Taxas usadas na comparação do painel e do fechamento. Ajuste se o seu contrato for diferente."
+          />
+          <CardBody className="grid gap-3 sm:grid-cols-2">
+            <Field label="Pix na maquininha (%)">
+              {(p) => <Input {...p} inputMode="decimal" value={rates.pos} onChange={(e) => setRates({ ...rates, pos: e.target.value })} />}
+            </Field>
+            <Field label="Pix por link (%)">
+              {(p) => <Input {...p} inputMode="decimal" value={rates.link} onChange={(e) => setRates({ ...rates, link: e.target.value })} />}
+            </Field>
           </CardBody>
         </Card>
 

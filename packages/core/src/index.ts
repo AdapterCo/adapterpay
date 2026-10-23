@@ -18,6 +18,8 @@ export * from './charges/fees';
 export * from './pos/pos-sync';
 export * from './billing/billing-service';
 export * from './billing/periods';
+export * from './whatsapp/evolution';
+export * from './reports/daily-closing';
 
 export const QUEUES = {
   charges: 'charges',

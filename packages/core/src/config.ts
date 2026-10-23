@@ -40,6 +40,10 @@ const schema = z
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
     SMTP_FROM: z.string().default('AdapterPay <nao-responda@adapterco.com.br>'),
+    /** WhatsApp via Evolution API (fechamento de caixa diário). Sem estas três, o envio fica desligado. */
+    EVOLUTION_API_URL: z.string().url().optional(),
+    EVOLUTION_API_KEY: z.string().optional(),
+    EVOLUTION_INSTANCE: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional(),
     SWAGGER_USER: z.string().optional(),
     SWAGGER_PASSWORD: z.string().optional(),
     METRICS_TOKEN: z.string().optional(),

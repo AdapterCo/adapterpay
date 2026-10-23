@@ -124,6 +124,15 @@ model Tenant {
   allowSellerCancel Boolean @default(false) @map("allow_seller_cancel")
   requireAdminMfa   Boolean @default(false) @map("require_admin_mfa")
   suspendedReason String?   @map("suspended_reason")
+  /// Taxas de referência do "Quanto você economizou", em pontos-base (49 = 0,49%)
+  savingsPosRateBps  Int     @default(49) @map("savings_pos_rate_bps")
+  savingsLinkRateBps Int     @default(99) @map("savings_link_rate_bps")
+  /// Fechamento de caixa diário enviado por WhatsApp (Evolution API)
+  dailyReportEnabled Boolean @default(false) @map("daily_report_enabled")
+  /// WhatsApp do dono, só dígitos com DDI (ex.: 5511987654321)
+  dailyReportPhone   String? @map("daily_report_phone")
+  /// Hora local (fuso do tenant) do envio, 0–23
+  dailyReportHour    Int     @default(22) @map("daily_report_hour")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(3)
@@ -138,10 +147,32 @@ model Tenant {
   auditLogs     AuditLog[]
   notifications Notification[]
   storeMemberships StoreMembership[]
+  dailyReports  DailyReport[]
 
   @@index([status])
   @@index([taxIdHash])
   @@map("tenants")
+}
+
+/// Fechamento de caixa diário: uma linha por tenant e dia local garante envio único.
+model DailyReport {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  /// dia local no fuso do tenant (YYYY-MM-DD)
+  day       String
+  /// PENDING | SENT | FAILED
+  status    String    @default("PENDING")
+  attempts  Int       @default(0)
+  lastError String?   @map("last_error")
+  sentAt    DateTime? @map("sent_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, day])
+  @@index([status])
+  @@map("daily_reports")
 }
 
 model User {

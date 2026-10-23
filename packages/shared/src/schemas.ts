@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAX_CHARGE_CENTS } from './money';
 import { TENANT_ROLES } from './roles';
+import { normalizeBrWhatsApp } from './savings';
 
 /** Schemas de entrada compartilhados entre API (validação autoritativa) e frontend (validação de formulário). */
 
@@ -211,6 +212,23 @@ export const tenantSettingsSchema = z.object({
   allowSellerCancel: z.boolean().optional(),
   requireAdminMfa: z.boolean().optional(),
   fiscalAddress: z.string().trim().max(300).nullable().optional(),
+  /** Taxas de referência do "Quanto você economizou" (pontos-base: 49 = 0,49%). */
+  savingsPosRateBps: z.number().int().min(0).max(2000).optional(),
+  savingsLinkRateBps: z.number().int().min(0).max(2000).optional(),
+  /** Fechamento de caixa diário por WhatsApp. */
+  dailyReportEnabled: z.boolean().optional(),
+  dailyReportPhone: z
+    .string()
+    .trim()
+    .max(30)
+    .transform((v, ctx) => {
+      const n = normalizeBrWhatsApp(v);
+      if (!n) ctx.addIssue({ code: 'custom', message: 'Informe um WhatsApp com DDD, ex.: (11) 98765-4321' });
+      return n ?? '';
+    })
+    .nullable()
+    .optional(),
+  dailyReportHour: z.number().int().min(0).max(23).optional(),
 });
 
 export const adminTenantActionSchema = z.object({

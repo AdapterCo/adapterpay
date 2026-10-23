@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
-import type { CoreDeps } from '@adapterpay/core';
+import { localDayHour, localMidnight, type CoreDeps } from '@adapterpay/core';
 import { Prisma } from '@adapterpay/database';
-import { CHARGE_STATUS_LABELS, centsToDecimalString, type ChargeStatus } from '@adapterpay/shared';
+import { CHARGE_STATUS_LABELS, centsToDecimalString, computeSavings, type ChargeStatus } from '@adapterpay/shared';
 import { storeScope } from '../common/access';
 import { Errors } from '../common/errors';
 import type { AuthContext } from '../common/request';
@@ -84,11 +84,16 @@ export class ReportsService {
   }
 
   async dashboard(auth: AuthContext) {
-    const tenant = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: auth.tenantId! }, select: { timezone: true } });
+    const tenant = await this.deps.prisma.tenant.findUniqueOrThrow({
+      where: { id: auth.tenantId! },
+      select: { timezone: true, savingsPosRateBps: true, savingsLinkRateBps: true },
+    });
     const now = new Date();
     const today = startOfDayInTz(now, tenant.timezone);
     const tomorrow = new Date(today.getTime() + 86_400_000);
     const monthAgo = new Date(today.getTime() - 29 * 86_400_000);
+    const monthStart = localMidnight(`${localDayHour(now, tenant.timezone).day.slice(0, 8)}01`, tenant.timezone);
+    const month = await this.summary(auth, { from: monthStart, to: tomorrow });
     const scope = this.scopeSql(auth, {});
     const baseWhere = { tenantId: auth.tenantId!, ...storeScope(auth) };
 
@@ -110,6 +115,19 @@ export class ReportsService {
     return {
       timezone: tenant.timezone,
       today: { ...todaySummary, activeCharges: active, expiredToday, reconciling },
+      // "Quanto você economizou" no mês corrente: tarifa real paga x Pix na maquininha/link.
+      savingsMonth: {
+        ...computeSavings({
+          grossCents: month.grossCents,
+          paidFeeCents: month.feeCents,
+          posRateBps: tenant.savingsPosRateBps,
+          linkRateBps: tenant.savingsLinkRateBps,
+        }),
+        paidCount: month.paidCount,
+        feeUnknownCount: month.feeUnknownCount,
+        posRateBps: tenant.savingsPosRateBps,
+        linkRateBps: tenant.savingsLinkRateBps,
+      },
       last30Days: {
         byStore,
         byPos,
