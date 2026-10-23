@@ -4,7 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
-import type { NextFunction, Request, Response } from 'express';
+import { raw, type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { safeEqual, type CoreDeps } from '@adapterpay/core';
@@ -34,6 +34,8 @@ async function bootstrap(): Promise<void> {
     req.path.startsWith('/api/v1/docs') ? docsHelmet(req, res, next) : apiHelmet(req, res, next),
   );
   app.use(cookieParser());
+  // Foto de produto: corpo binário só nesta rota (o restante da API continua só JSON).
+  app.use(/^\/api\/v1\/products\/[0-9a-f-]{36}\/image$/, raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '3mb' }));
   app.use(
     pinoHttp({
       logger,

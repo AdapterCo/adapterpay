@@ -9,6 +9,7 @@ import {
   MpApiError,
   randomToken,
   submitOrder,
+  localDayHour,
   writeAudit,
   type CoreDeps,
 } from '@adapterpay/core';
@@ -47,7 +48,7 @@ export class ChargesService {
    * com exclusão mútua (lock + índice parcial), cria CREATING com referência e chave idempotente,
    * chama a Orders API e grava PENDING. O worker acompanha até o estado final.
    */
-  async create(auth: AuthContext, input: CreateChargeInput, clientRequestId: string | undefined, meta: RequestMeta) {
+  async create(auth: AuthContext, input: CreateChargeInput, clientRequestId: string | undefined, meta: RequestMeta, opts: { totemId?: string } = {}) {
     const tenantId = auth.tenantId!;
     if (clientRequestId !== undefined && !/^[A-Za-z0-9-]{8,64}$/.test(clientRequestId)) {
       throw Errors.validation('Idempotency-Key inválida');
@@ -131,6 +132,17 @@ export class ChargesService {
         if (locked.activeChargeId) await this.throwPosBusy(tx, locked.activeChargeId);
         if (locked.externalId !== pos.externalId) throw Errors.conflict('POS alterado durante a operação; tente novamente');
 
+        // Número do pedido do dia na loja (retirada/cozinha): pedidos com itens do catálogo ou do totem.
+        let orderNumber: number | null = null;
+        if (lines.length > 0 || opts.totemId) {
+          const day = localDayHour(new Date(), pos.store.timezone).day;
+          const counter = await tx.$queryRaw<Array<{ last: number }>>`
+            INSERT INTO order_counters (store_id, day, last) VALUES (${pos.storeId}::uuid, ${day}, 1)
+            ON CONFLICT (store_id, day) DO UPDATE SET last = order_counters.last + 1
+            RETURNING last`;
+          orderNumber = counter[0]!.last;
+        }
+
         const charge = await tx.charge.create({
           data: {
             tenantId,
@@ -149,6 +161,8 @@ export class ChargesService {
             loyaltyCustomerId,
             loyaltyRewardId: reward?.id ?? null,
             discountCents: discount,
+            totemId: opts.totemId ?? null,
+            orderNumber,
           },
         });
         if (reward) {
@@ -370,6 +384,8 @@ export class ChargesService {
       items: c.items,
       discountCents: c.discountCents,
       loyaltyCustomerName: c.loyaltyCustomer?.name ?? null,
+      orderNumber: c.orderNumber,
+      fulfillmentStatus: c.fulfillmentStatus,
     };
   }
 

@@ -122,6 +122,8 @@ export async function applyChargeTransition(
       data.paidAt = now;
       data.terminalAt = charge.terminalAt ?? now;
       data.mpPaymentId = p.mpPaymentId;
+      // Pedido numerado (totem/catálogo) entra na fila da cozinha/balcão.
+      if (charge.orderNumber !== null && !charge.fulfillmentStatus) data.fulfillmentStatus = 'PREPARING';
     } else if (target === 'REFUNDED') {
       await tx.payment.updateMany({ where: { chargeId: charge.id, refundedAt: null }, data: { refundedAt: now } });
     } else if (POS_RELEASING_STATUSES.includes(target)) {

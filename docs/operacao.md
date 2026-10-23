@@ -34,6 +34,14 @@ Migração com falha encerra o job com erro: `deploy.sh` aborta antes de trocar 
 
 Copie `backups/` para armazenamento externo (ex.: `rclone copy backups remote:adapterpay-backups`), mantendo a chave GPG privada fora da VPS.
 
+## Totem (autoatendimento)
+
+- **Preço:** o superadmin define o preço por totem em Planos (vazio = plano sem totem). Cada totem ativo soma ao valor da mensalidade **a partir da próxima renovação**, sem cobrança pró-rata. No cartão, o valor da recorrência é atualizado na hora; no Pix, a fatura de renovação ainda sem QR é reemitida com o valor novo.
+- **Montagem:** um POS exclusivo por totem (o Mercado Pago aceita uma cobrança ativa por POS). Tablet Android com navegador em modo quiosque (ex.: Fully Kiosk Browser) abrindo `https://<domínio>/totem`. Leitor USB de código de barras é opcional.
+- **Pareamento:** painel › Totens › criar → código de 8 caracteres válido por 30 min, digitado no tablet. O tablet recebe um cookie próprio (HttpOnly, SameSite=Strict, token guardado só como hash) que só permite catálogo e pedidos no POS do totem. "Revogar" corta o acesso na hora.
+- **Pedidos:** compras do totem e do catálogo recebem número do dia por loja e aparecem em painel › Pedidos (em preparo → pronto → entregue).
+- **Fotos:** ficam no volume `uploads` da API e entram no `backup.sh` (`adapterpay-<data>-uploads.tgz`). Para restaurar: `docker compose -f docker-compose.prod.yml exec -T api tar -xzf - -C /app < backups/<arquivo>-uploads.tgz`.
+
 ## Observabilidade e alertas
 
 - Logs JSON com `correlation_id` (header `X-Request-Id`).

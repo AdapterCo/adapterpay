@@ -41,6 +41,21 @@ export function limitFor(plan: PlanLimits, resource: LimitResource): number {
   }
 }
 
+/** Mensalidade com o adicional de totens: preço do plano + quantidade × preço por totem. */
+export function subscriptionMonthlyCents(plan: { priceCents: number; totemPriceCents: number | null }, totemQuantity: number): number {
+  return plan.priceCents + (plan.totemPriceCents ?? 0) * Math.max(0, totemQuantity);
+}
+
+/**
+ * Valores de cobrança recorrente aceitos para um plano: mensalidade com 0..maxTotems totens.
+ * A quantidade de totens pode ter mudado entre a cobrança do cartão e a consulta.
+ */
+export function acceptedMonthlyAmounts(plan: { priceCents: number; totemPriceCents: number | null }, maxTotems: number): number[] {
+  const out: number[] = [];
+  for (let q = 0; q <= Math.max(0, maxTotems); q++) out.push(subscriptionMonthlyCents(plan, q));
+  return out;
+}
+
 /** true se for permitido ativar mais `increment` itens do recurso. */
 export function canActivate(plan: PlanLimits, usage: UsageCounts, resource: LimitResource, increment = 1): boolean {
   return usage[resource] + increment <= limitFor(plan, resource);

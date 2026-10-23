@@ -189,6 +189,32 @@ export const loyaltyCustomerSchema = z.object({
   whatsappOptIn: z.boolean().default(false),
 });
 export const loyaltyCustomerUpdateSchema = loyaltyCustomerSchema.pick({ name: true, whatsappOptIn: true }).partial();
+/** Totem de autoatendimento. */
+export const totemCreateSchema = z.object({
+  name: z.string().trim().min(2, 'Informe um nome, ex.: Totem entrada').max(60),
+  posId: uuid,
+});
+export const totemPairSchema = z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{8}$/, 'Código de pareamento inválido') });
+export const totemOrderSchema = z.object({
+  items: z
+    .array(z.object({ productId: uuid, quantity: z.number().int().min(1).max(99) }))
+    .min(1, 'Carrinho vazio')
+    .max(50)
+    .refine((a) => new Set(a.map((i) => i.productId)).size === a.length, 'Produto repetido no carrinho'),
+  /** Total que o cliente viu na tela; o servidor recalcula e confere. */
+  amountCents: z.number().int().positive().max(MAX_CHARGE_CENTS),
+  /** Fidelidade no totem: o cliente informa o próprio WhatsApp (nada é exibido sobre outros clientes). */
+  loyalty: z
+    .object({
+      phone: z.string().trim().max(30),
+      name: z.string().trim().min(2).max(80).optional(),
+      whatsappOptIn: z.boolean().optional(),
+      rewardCode: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{6}$/, 'Código inválido').optional(),
+    })
+    .optional(),
+});
+export const fulfillmentSchema = z.object({ status: z.enum(['PREPARING', 'READY', 'DELIVERED']) });
+
 export const redeemRewardSchema = z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{6}$/, 'Código inválido') });
 
 export const productInputSchema = z.object({

@@ -38,6 +38,7 @@ interface ChargeDetail {
   posName: string;
   storeName: string;
   items?: Array<{ name: string; unitPriceCents: number; quantity: number }>;
+  orderNumber?: number | null;
 }
 
 interface Product {
@@ -284,6 +285,7 @@ export default function NewChargePage() {
         <Card className="mx-auto max-w-xl">
           <CardBody className="flex flex-col items-center gap-4 py-8 text-center">
             <ChargeStatusBadge status={charge.status} />
+            {charge.orderNumber ? <p className="text-sm text-slate-600">Pedido <strong className="tabular-nums text-ink">{String(charge.orderNumber).padStart(3, '0')}</strong></p> : null}
             <p className="text-5xl font-bold tabular-nums">{formatBRL(charge.amountCents)}</p>
             {charge.items && charge.items.length > 0 && (
               <p className="max-w-sm text-sm text-slate-600">{cartDescription(charge.items, 300)}</p>

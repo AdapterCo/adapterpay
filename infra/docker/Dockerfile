@@ -62,6 +62,10 @@ CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema prisma/sche
 # ---------------------------------------------------------------- api
 FROM runtime AS api
 COPY --from=build --chown=node:node /out/api /app
+# Pasta das fotos (volume): criada com dono node para o volume herdar a permissão.
+USER root
+RUN mkdir -p /app/uploads && chown node:node /app/uploads
+USER node
 EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:4000/api/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

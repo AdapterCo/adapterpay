@@ -1,31 +1,38 @@
-import { Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Controller, Delete, Get, Header, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Put, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import type { Request, Response } from 'express';
 import { writeAudit, type CoreDeps } from '@adapterpay/core';
 import { isUniqueViolation } from '@adapterpay/database';
 import { productInputSchema, productUpdateSchema, type ProductInput } from '@adapterpay/shared';
 import type { z } from 'zod';
-import { RequirePermission } from '../auth/decorators';
+import { Public, RequirePermission } from '../auth/decorators';
 import { Errors } from '../common/errors';
+import { RateLimit } from '../common/rate-limit';
 import { CurrentAuth, Meta, requireTenant, type AuthContext, type RequestMeta } from '../common/request';
 import { CORE } from '../common/tokens';
 import { ApiZodBody, ZBody } from '../common/zod';
+import { ProductImages, productImageUrl } from './product-images';
 
 const MAX_PRODUCTS = 500;
 
-/** Catálogo de produtos da cobrança rápida. Administrador gerencia; vendedor só consulta os ativos. */
+/** Catálogo de produtos da cobrança rápida e do totem. Administrador gerencia; vendedor só consulta os ativos. */
 @ApiTags('products')
 @Controller('products')
 export class ProductsController {
-  constructor(@Inject(CORE) private readonly deps: CoreDeps) {}
+  constructor(
+    @Inject(CORE) private readonly deps: CoreDeps,
+    private readonly images: ProductImages,
+  ) {}
 
   @Get()
   @RequirePermission('products:read')
-  list(@CurrentAuth() auth: AuthContext) {
-    return this.deps.prisma.product.findMany({
+  async list(@CurrentAuth() auth: AuthContext) {
+    const rows = await this.deps.prisma.product.findMany({
       where: { tenantId: requireTenant(auth), ...(auth.role === 'ADMIN' ? {} : { active: true }) },
       orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
-      select: { id: true, name: true, code: true, priceCents: true, category: true, active: true, sortOrder: true },
+      select: { id: true, name: true, code: true, imageKey: true, priceCents: true, category: true, active: true, sortOrder: true },
     });
+    return rows.map(({ imageKey, ...p }) => ({ ...p, imageUrl: productImageUrl(imageKey) }));
   }
 
   /** Código único por empresa: o leitor de código de barras precisa achar um só produto. */
@@ -72,6 +79,29 @@ export class ProductsController {
     return p;
   }
 
+  /** Foto do produto: corpo binário (JPEG/PNG/WebP, até 2 MB). Substitui a anterior. */
+  @Put(':id/image')
+  @RequirePermission('products:manage')
+  @RateLimit({ key: 'product-image', limit: 60, windowSec: 600, by: 'user' })
+  async setImage(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Req() req: Request, @Meta() meta: RequestMeta) {
+    const p = await this.find(auth, id);
+    const key = await this.images.save(req.body);
+    await this.deps.prisma.product.update({ where: { id: p.id }, data: { imageKey: key } });
+    await this.images.remove(p.imageKey);
+    await this.audit(auth, meta, id, 'product.image_updated');
+    return { imageUrl: productImageUrl(key) };
+  }
+
+  @Delete(':id/image')
+  @HttpCode(204)
+  @RequirePermission('products:manage')
+  async removeImage(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Meta() meta: RequestMeta): Promise<void> {
+    const p = await this.find(auth, id);
+    await this.deps.prisma.product.update({ where: { id: p.id }, data: { imageKey: null } });
+    await this.images.remove(p.imageKey);
+    await this.audit(auth, meta, id, 'product.image_removed');
+  }
+
   /** Remove do catálogo. Vendas antigas mantêm a cópia do nome e do preço. */
   @Delete(':id')
   @HttpCode(204)
@@ -79,6 +109,7 @@ export class ProductsController {
   async remove(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Meta() meta: RequestMeta): Promise<void> {
     const p = await this.find(auth, id);
     await this.deps.prisma.product.delete({ where: { id: p.id } });
+    await this.images.remove(p.imageKey);
     await this.audit(auth, meta, id, 'product.deleted', { name: p.name, priceCents: p.priceCents });
   }
 
@@ -101,5 +132,23 @@ export class ProductsController {
       ip: meta.ip,
       correlationId: meta.correlationId,
     });
+  }
+}
+
+/** Fotos públicas (painel, totem e páginas públicas). Nome aleatório: cache imutável. */
+@ApiTags('public')
+@Public()
+@Controller('public/images')
+export class PublicImagesController {
+  constructor(private readonly images: ProductImages) {}
+
+  @Get(':key')
+  @RateLimit({ key: 'pub-image', limit: 600, windowSec: 60 })
+  @Header('Cache-Control', 'public, max-age=31536000, immutable')
+  async get(@Param('key') key: string, @Res() res: Response): Promise<void> {
+    const { data, mime } = await this.images.read(key);
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.end(data);
   }
 }

@@ -19,6 +19,8 @@ const tenantsQuery = z.object({
 
 const planUpdate = z.object({
   priceCents: z.number().int().positive().max(10_000_000).optional(),
+  /** Preço mensal por totem; null = plano sem totem. */
+  totemPriceCents: z.number().int().positive().max(10_000_000).nullable().optional(),
   active: z.boolean().optional(),
   reason: z.string().trim().min(5).max(500),
 });
@@ -206,15 +208,18 @@ export class AdminController {
   async updatePlan(@CurrentAuth() auth: AuthContext, @Param('id') id: string, @ZBody(planUpdate) body: z.infer<typeof planUpdate>, @Meta() meta: RequestMeta) {
     const before = await this.deps.prisma.plan.findUnique({ where: { id } });
     if (!before) throw Errors.notFound('Plano');
-    const after = await this.deps.prisma.plan.update({ where: { id }, data: { priceCents: body.priceCents, active: body.active } });
+    const after = await this.deps.prisma.plan.update({
+      where: { id },
+      data: { priceCents: body.priceCents, active: body.active, totemPriceCents: body.totemPriceCents },
+    });
     await writeAudit(this.deps.prisma, {
       actorUserId: auth.userId,
       actorType: 'SUPERADMIN',
       resourceType: 'plan',
       resourceId: id,
       action: 'admin.plan_updated',
-      before: { priceCents: before.priceCents, active: before.active },
-      after: { priceCents: after.priceCents, active: after.active, reason: body.reason },
+      before: { priceCents: before.priceCents, totemPriceCents: before.totemPriceCents, active: before.active },
+      after: { priceCents: after.priceCents, totemPriceCents: after.totemPriceCents, active: after.active, reason: body.reason },
       ip: meta.ip,
       correlationId: meta.correlationId,
     });

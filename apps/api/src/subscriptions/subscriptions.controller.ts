@@ -60,6 +60,7 @@ export class SubscriptionsController {
         currentPeriodEnd: sub.currentPeriodEnd,
         cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
         preapprovalStatus: sub.preapprovalStatus,
+        totemQuantity: sub.totemQuantity,
       },
       usage,
       limits: sub ? { pos: sub.plan.maxPos, stores: sub.plan.maxStores, users: sub.plan.maxUsers } : null,

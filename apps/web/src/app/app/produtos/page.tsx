@@ -4,21 +4,34 @@ import { useState, type FormEvent } from 'react';
 import { formatBRL } from '@adapterpay/shared';
 import { Alert, Badge, Button, Card, Checkbox, Dialog, EmptyState, Field, Input, PageHeader, Spinner, Table, Td, Th } from '@adapterpay/ui';
 import { MoneyInput } from '@/components/domain';
-import { api, errorMessage } from '@/lib/api';
+import { api, apiUpload, errorMessage } from '@/lib/api';
+import { resizeImage } from '@/lib/image';
 import { useApi } from '@/lib/hooks';
 
 interface Product {
   id: string;
   name: string;
   code: string | null;
+  imageUrl: string | null;
   priceCents: number;
   category: string | null;
   active: boolean;
   sortOrder: number;
 }
 
-type Draft = { id: string | null; name: string; code: string; priceCents: number | null; category: string; active: boolean };
-const EMPTY: Draft = { id: null, name: '', code: '', priceCents: null, category: '', active: true };
+type Draft = {
+  id: string | null;
+  name: string;
+  code: string;
+  priceCents: number | null;
+  category: string;
+  active: boolean;
+  imageUrl: string | null;
+  /** foto nova (já reduzida) ou 'remove' para tirar a atual */
+  photo: Blob | 'remove' | null;
+  preview: string | null;
+};
+const EMPTY: Draft = { id: null, name: '', code: '', priceCents: null, category: '', active: true, imageUrl: null, photo: null, preview: null };
 
 /** Catálogo da cobrança rápida: o vendedor toca nos produtos e o total é calculado no servidor. */
 export default function ProductsPage() {
@@ -37,13 +50,29 @@ export default function ProductsPage() {
     setError(null);
     try {
       const body = { name: draft.name, code: draft.code.trim() || null, priceCents: draft.priceCents, category: draft.category.trim() || null, active: draft.active };
-      await api(draft.id ? `/products/${draft.id}` : '/products', { method: draft.id ? 'PATCH' : 'POST', body });
+      const saved = await api<{ id: string }>(draft.id ? `/products/${draft.id}` : '/products', { method: draft.id ? 'PATCH' : 'POST', body });
+      const id = draft.id ?? saved.id;
+      if (draft.photo === 'remove') await api(`/products/${id}/image`, { method: 'DELETE' });
+      else if (draft.photo) await apiUpload(`/products/${id}/image`, draft.photo);
+      if (draft.preview) URL.revokeObjectURL(draft.preview);
       setDraft(null);
       await products.reload();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file || !draft) return;
+    setError(null);
+    try {
+      const blob = await resizeImage(file);
+      if (draft.preview) URL.revokeObjectURL(draft.preview);
+      setDraft({ ...draft, photo: blob, preview: URL.createObjectURL(blob) });
+    } catch (err) {
+      setError((err as Error).message);
     }
   };
 
@@ -94,14 +123,23 @@ export default function ProductsPage() {
             <tbody className="divide-y divide-slate-100">
               {products.data.map((p) => (
                 <tr key={p.id}>
-                  <Td className="font-medium">{p.name}</Td>
+                  <Td className="font-medium">
+                    <div className="flex items-center gap-3">
+                      {p.imageUrl ? (
+                        <img src={p.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-md object-cover ring-1 ring-line" loading="lazy" />
+                      ) : (
+                        <span className="h-10 w-10 shrink-0 rounded-md bg-paper ring-1 ring-line" aria-hidden="true" />
+                      )}
+                      {p.name}
+                    </div>
+                  </Td>
                   <Td className="font-mono text-xs text-slate-600">{p.code ?? '—'}</Td>
                   <Td className="text-slate-600">{p.category ?? '—'}</Td>
                   <Td className="text-right tabular-nums">{formatBRL(p.priceCents)}</Td>
                   <Td>{p.active ? <Badge tone="success">À venda</Badge> : <Badge>Pausado</Badge>}</Td>
                   <Td className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => { setError(null); setDraft({ id: p.id, name: p.name, code: p.code ?? '', priceCents: p.priceCents, category: p.category ?? '', active: p.active }); }}>Editar</Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setError(null); setDraft({ id: p.id, name: p.name, code: p.code ?? '', priceCents: p.priceCents, category: p.category ?? '', active: p.active, imageUrl: p.imageUrl, photo: null, preview: null }); }}>Editar</Button>
                       <Button size="sm" variant="ghost" onClick={() => void toggle(p)}>{p.active ? 'Pausar' : 'Reativar'}</Button>
                       <Button size="sm" variant="ghost" onClick={() => void remove(p)}>Remover</Button>
                     </div>
@@ -118,6 +156,28 @@ export default function ProductsPage() {
           <form onSubmit={save} className="flex flex-col gap-4">
             {error && <Alert tone="danger">{error}</Alert>}
             <Field label="Nome">{(p) => <Input {...p} required maxLength={80} autoFocus value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />}</Field>
+            <div className="flex items-center gap-4">
+              {(() => {
+                const src = draft.photo === 'remove' ? null : draft.preview ?? draft.imageUrl;
+                return src ? (
+                  <img src={src} alt="Foto do produto" className="h-20 w-20 rounded-lg object-cover ring-1 ring-line" />
+                ) : (
+                  <span className="flex h-20 w-20 items-center justify-center rounded-lg bg-paper text-xs text-slate-500 ring-1 ring-line">Sem foto</span>
+                );
+              })()}
+              <div className="flex flex-col items-start gap-1">
+                <label className="cursor-pointer text-sm font-medium text-brand-700 hover:underline">
+                  {draft.imageUrl || draft.preview ? 'Trocar foto' : 'Adicionar foto'}
+                  <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(e) => void pickPhoto(e.target.files?.[0])} />
+                </label>
+                {(draft.imageUrl || draft.preview) && draft.photo !== 'remove' && (
+                  <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => setDraft({ ...draft, photo: 'remove', preview: null })}>
+                    Remover foto
+                  </button>
+                )}
+                <p className="text-xs text-slate-500">Aparece no totem. JPEG, PNG ou WebP.</p>
+              </div>
+            </div>
             <Field label="Código (opcional)" hint="Leia o código de barras com o leitor ou digite um código interno.">
               {(p) => (
                 <Input

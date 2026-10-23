@@ -33,5 +33,16 @@ chmod 600 "$OUT"
 sha256sum "$OUT" > "$OUT.sha256"
 echo ">> Backup: $OUT ($(du -h "$OUT" | cut -f1))"
 
+# Fotos dos produtos (volume da API). Falha aqui não invalida o backup do banco.
+UPLOADS_OUT="$DIR/adapterpay-$STAMP-$LABEL-uploads.tgz"
+if docker compose -f docker-compose.prod.yml exec -T api tar -czf - -C /app uploads > "$UPLOADS_OUT" 2>/dev/null && [ -s "$UPLOADS_OUT" ]; then
+  chmod 600 "$UPLOADS_OUT"
+  echo ">> Fotos: $UPLOADS_OUT ($(du -h "$UPLOADS_OUT" | cut -f1))"
+else
+  rm -f "$UPLOADS_OUT"
+  echo "AVISO: backup das fotos não gerado (API parada ou sem fotos)."
+fi
+
 # Retenção local: 30 dias (copie para armazenamento externo — ver docs/operacao.md).
 find "$DIR" -name 'adapterpay-*.dump*' -mtime +30 -delete
+find "$DIR" -name 'adapterpay-*-uploads.tgz' -mtime +30 -delete

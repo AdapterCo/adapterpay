@@ -14,6 +14,7 @@ interface Plan {
   maxPos: number;
   maxStores: number;
   maxUsers: number;
+  totemPriceCents: number | null;
   active: boolean;
 }
 
@@ -22,6 +23,7 @@ export default function PlansAdminPage() {
   const plans = useApi<Plan[]>('/admin/plans');
   const [edit, setEdit] = useState<Plan | null>(null);
   const [price, setPrice] = useState('');
+  const [totemPrice, setTotemPrice] = useState('');
   const [active, setActive] = useState(true);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +32,7 @@ export default function PlansAdminPage() {
   const open = (p: Plan) => {
     setEdit(p);
     setPrice(formatBRL(p.priceCents).replace('R$ ', ''));
+    setTotemPrice(p.totemPriceCents ? formatBRL(p.totemPriceCents).replace('R$ ', '') : '');
     setActive(p.active);
     setReason('');
     setError(null);
@@ -41,7 +44,8 @@ export default function PlansAdminPage() {
     setError(null);
     try {
       const priceCents = parseBrlInputToCents(price);
-      await critical(() => api(`/admin/plans/${edit.id}`, { method: 'PATCH', body: { priceCents, active, reason } }));
+      const totemPriceCents = totemPrice.trim() ? parseBrlInputToCents(totemPrice) : null;
+      await critical(() => api(`/admin/plans/${edit.id}`, { method: 'PATCH', body: { priceCents, totemPriceCents, active, reason } }));
       setEdit(null);
       await plans.reload();
     } catch (err) {
@@ -57,12 +61,13 @@ export default function PlansAdminPage() {
       <Card>
         {!plans.data ? <div className="p-6"><Spinner className="h-5 w-5" /></div> : (
           <Table>
-            <thead><tr><Th>Plano</Th><Th className="text-right">Mensalidade</Th><Th>POS</Th><Th>Lojas</Th><Th>Usuários</Th><Th>Status</Th><Th /></tr></thead>
+            <thead><tr><Th>Plano</Th><Th className="text-right">Mensalidade</Th><Th className="text-right">Por totem</Th><Th>POS</Th><Th>Lojas</Th><Th>Usuários</Th><Th>Status</Th><Th /></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {plans.data.map((p) => (
                 <tr key={p.id}>
                   <Td className="font-medium">{p.name}</Td>
                   <Td className="text-right tabular-nums">{formatBRL(p.priceCents)}</Td>
+                  <Td className="text-right tabular-nums">{p.totemPriceCents ? formatBRL(p.totemPriceCents) : <span className="text-slate-400">sem totem</span>}</Td>
                   <Td>{p.maxPos}</Td>
                   <Td>{p.maxStores}</Td>
                   <Td>{p.maxUsers}</Td>
@@ -78,6 +83,9 @@ export default function PlansAdminPage() {
         <div className="flex flex-col gap-3">
           {error && <Alert tone="danger">{error}</Alert>}
           <Field label="Mensalidade (R$)">{(p) => <Input {...p} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />}</Field>
+          <Field label="Preço por totem (R$/mês)" hint="Deixe vazio para o plano não oferecer totem. Vale a partir da próxima renovação de cada cliente.">
+            {(p) => <Input {...p} inputMode="decimal" placeholder="sem totem" value={totemPrice} onChange={(e) => setTotemPrice(e.target.value)} />}
+          </Field>
           <Checkbox checked={active} onChange={(e) => setActive(e.target.checked)} label="Plano disponível para contratação" />
           <Field label="Justificativa (auditoria)">{(p) => <Textarea {...p} value={reason} onChange={(e) => setReason(e.target.value)} />}</Field>
           <div className="flex justify-end gap-2">

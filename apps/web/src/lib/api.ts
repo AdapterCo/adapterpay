@@ -69,6 +69,56 @@ export async function api<T = unknown>(path: string, opts: Options = {}, retry =
   return data as T;
 }
 
+async function parseResponse<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as T;
+  const data = (await res.json().catch(() => null)) as { error?: { code: string; message: string; details?: unknown } } | null;
+  if (!res.ok) {
+    const e = data?.error;
+    throw new ApiError(res.status, e?.code ?? 'HTTP_ERROR', e?.message ?? 'Erro inesperado', e?.details);
+  }
+  return data as T;
+}
+
+/** Envio binário (foto de produto): corpo com os bytes da imagem. */
+export async function apiUpload<T = unknown>(path: string, blob: Blob): Promise<T> {
+  const csrf = await ensureCsrf();
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1${path}`, {
+      method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': blob.type || 'image/jpeg', 'X-CSRF-Token': csrf },
+      body: blob,
+      credentials: 'include',
+      cache: 'no-store',
+    });
+  } catch {
+    throw new ApiError(0, 'NETWORK', 'Sem conexão com o servidor. Verifique sua internet.');
+  }
+  return parseResponse<T>(res);
+}
+
+/** API do totem: autentica pelo cookie do dispositivo (sem sessão de usuário nem CSRF da sessão). */
+export async function totemApi<T = unknown>(path: string, opts: { method?: 'GET' | 'POST'; body?: unknown } = {}): Promise<T> {
+  const method = opts.method ?? 'GET';
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1/totem${path}`, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        'X-AdapterPay-Totem': '1',
+        ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      credentials: 'include',
+      cache: 'no-store',
+    });
+  } catch {
+    throw new ApiError(0, 'NETWORK', 'Sem conexão. Tentando novamente…');
+  }
+  return parseResponse<T>(res);
+}
+
 /** Mensagem amigável para exibir ao usuário. */
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {

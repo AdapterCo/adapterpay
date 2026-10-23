@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { formatBRL } from '@adapterpay/shared';
+import { formatBRL, subscriptionMonthlyCents } from '@adapterpay/shared';
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Dialog, PageHeader, Spinner, Table, Td, Th } from '@adapterpay/ui';
 import { useCritical } from '@/components/critical';
 import { InvoicePix } from '@/components/invoice-pix';
@@ -18,6 +18,7 @@ interface Plan {
   maxPos: number;
   maxStores: number;
   maxUsers: number;
+  totemPriceCents?: number | null;
 }
 
 interface Current {
@@ -32,6 +33,7 @@ interface Current {
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
     preapprovalStatus: string | null;
+    totemQuantity: number;
   };
   usage: { pos: number; stores: number; users: number };
   limits: { pos: number; stores: number; users: number } | null;
@@ -112,7 +114,15 @@ export default function SubscriptionPage() {
         <Card className="lg:col-span-2">
           <CardHeader
             title={sub ? `Plano ${sub.plan.name}` : 'Sem plano'}
-            description={sub ? `${formatBRL(sub.plan.priceCents)}/mês · ${sub.method === 'CARD' ? 'Cartão recorrente' : sub.method === 'PIX' ? 'Pix manual mensal' : 'forma de pagamento a definir'}` : undefined}
+            description={
+              sub
+                ? `${formatBRL(subscriptionMonthlyCents({ priceCents: sub.plan.priceCents, totemPriceCents: sub.plan.totemPriceCents ?? null }, sub.totemQuantity))}/mês${
+                    sub.totemQuantity > 0 && sub.plan.totemPriceCents
+                      ? ` (plano ${formatBRL(sub.plan.priceCents)} + ${sub.totemQuantity} ${sub.totemQuantity === 1 ? 'totem' : 'totens'} × ${formatBRL(sub.plan.totemPriceCents)})`
+                      : ''
+                  } · ${sub.method === 'CARD' ? 'Cartão recorrente' : sub.method === 'PIX' ? 'Pix manual mensal' : 'forma de pagamento a definir'}`
+                : undefined
+            }
             actions={sub && <Badge tone={active ? 'success' : sub.status === 'PENDING' ? 'info' : 'danger'}>{SUBSCRIPTION_LABELS[sub.status] ?? sub.status}</Badge>}
           />
           <CardBody className="space-y-4">

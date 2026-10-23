@@ -70,6 +70,9 @@ services:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     networks: [backend, egress, traefik]
+    # Fotos dos produtos (servidas pela própria API em /api/v1/public/images).
+    volumes:
+      - uploads:/app/uploads
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=${TRAEFIK_NETWORK}"
@@ -131,3 +134,4 @@ networks:
 volumes:
   pgdata:
   redisdata:
+  uploads:

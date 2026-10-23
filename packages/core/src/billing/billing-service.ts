@@ -1,5 +1,12 @@
 import type { BillingMethod, Invoice, InvoiceKind, Prisma, Subscription, TxClient } from '@adapterpay/database';
-import { centsToDecimalString, excessForPlan, prorataUpgradeCents, tryDecimalStringToCents } from '@adapterpay/shared';
+import {
+  acceptedMonthlyAmounts,
+  centsToDecimalString,
+  excessForPlan,
+  prorataUpgradeCents,
+  subscriptionMonthlyCents,
+  tryDecimalStringToCents,
+} from '@adapterpay/shared';
 import { writeAudit } from '../audit';
 import { resolvePlatformAccessToken } from '../config';
 import type { CoreDeps } from '../context';
@@ -111,10 +118,11 @@ export class BillingService {
     });
 
     const kind: InvoiceKind = sub.startedAt ? 'RENEWAL' : 'INITIAL';
+    const monthly = subscriptionMonthlyCents(plan, sub.totemQuantity);
 
     if (params.method === 'PIX') {
       const existing = await this.d.prisma.invoice.findFirst({
-        where: { subscriptionId: sub.id, status: 'OPEN', kind, planId: plan.id, method: 'PIX' },
+        where: { subscriptionId: sub.id, status: 'OPEN', kind, planId: plan.id, method: 'PIX', amountCents: monthly },
       });
       const invoice =
         existing ??
@@ -125,7 +133,7 @@ export class BillingService {
             kind,
             planId: plan.id,
             method: 'PIX',
-            amountCents: plan.priceCents,
+            amountCents: monthly,
             dueAt: addDays(new Date(), INITIAL_INVOICE_TTL_DAYS),
             externalReference: this.newExternalReference(),
           },
@@ -143,7 +151,7 @@ export class BillingService {
       reason: `AdapterPay — Plano ${plan.name}`,
       externalReference: `ADAPTERPAY_SUB_${sub.id.replace(/-/g, '')}`,
       payerEmail: params.payerEmail,
-      amountCents: plan.priceCents,
+      amountCents: monthly,
       backUrl: `${this.d.config.APP_URL}/assinatura/retorno`,
     });
     if (!pre.id || !pre.init_point) throw new BillingError('PROVIDER_ERROR', 'Resposta de assinatura sem init_point');
@@ -286,9 +294,9 @@ export class BillingService {
       await tx.subscription.update({ where: { id: sub.id }, data });
       if (sub.method === 'CARD' && sub.mpPreapprovalId) {
         const plan = await tx.plan.findUniqueOrThrow({ where: { id: invoice.planId } });
-        // Atualiza o valor recorrente do cartão para as próximas competências.
+        // Atualiza o valor recorrente do cartão (plano + totens) para as próximas competências.
         await updatePreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId, {
-          auto_recurring: { transaction_amount: Number(centsToDecimalString(plan.priceCents)), currency_id: 'BRL' },
+          auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(plan, sub.totemQuantity))), currency_id: 'BRL' },
         }).catch((err) => this.d.logger.error({ err: (err as Error).message, subId: sub.id }, 'falha ao atualizar valor do cartão'));
       }
       return;
@@ -324,7 +332,9 @@ export class BillingService {
     });
 
     const list = await searchAuthorizedPayments(this.d.mpApi, token, sub.mpPreapprovalId);
-    const allowedAmounts = new Set([sub.plan.priceCents, ...(sub.scheduledPlan ? [sub.scheduledPlan.priceCents] : [])]);
+    // Valores aceitos: plano (e plano agendado) com 0..N totens — a quantidade pode ter mudado após a cobrança.
+    const scheduledAmounts = new Set(sub.scheduledPlan ? acceptedMonthlyAmounts(sub.scheduledPlan, sub.totemQuantity) : []);
+    const allowedAmounts = new Set([...acceptedMonthlyAmounts(sub.plan, sub.totemQuantity), ...scheduledAmounts]);
     for (const ap of list.results ?? []) {
       const approved = ap.status === 'processed' && ap.payment?.status === 'approved';
       const amount = tryDecimalStringToCents(ap.transaction_amount);
@@ -333,7 +343,8 @@ export class BillingService {
       const exists = await this.d.prisma.invoice.findUnique({ where: { providerReference: reference } });
       if (exists) continue;
       const fresh = await this.d.prisma.subscription.findUniqueOrThrow({ where: { id: sub.id } });
-      const planId = sub.scheduledPlan && amount === sub.scheduledPlan.priceCents ? sub.scheduledPlan.id : sub.planId;
+      const currentAmounts = new Set(acceptedMonthlyAmounts(sub.plan, sub.totemQuantity));
+      const planId = sub.scheduledPlan && scheduledAmounts.has(amount) && !currentAmounts.has(amount) ? sub.scheduledPlan.id : sub.planId;
       const paidAt = parsePaidAt(ap.debit_date ?? ap.date_created ?? null);
       const invoice = await this.d.prisma.invoice.create({
         data: {
@@ -381,7 +392,7 @@ export class BillingService {
       if (sub.method === 'CARD') {
         if (sub.scheduledPlan && targetPlan.id === sub.scheduledPlan.id && sub.mpPreapprovalId) {
           await updatePreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId, {
-            auto_recurring: { transaction_amount: Number(centsToDecimalString(targetPlan.priceCents)), currency_id: 'BRL' },
+            auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(targetPlan, sub.totemQuantity))), currency_id: 'BRL' },
           }).catch((err) => this.d.logger.error({ err: (err as Error).message }, 'falha ao aplicar downgrade no cartão'));
         }
         continue;
@@ -397,7 +408,7 @@ export class BillingService {
           kind: 'RENEWAL',
           planId: targetPlan.id,
           method: 'PIX',
-          amountCents: targetPlan.priceCents,
+          amountCents: subscriptionMonthlyCents(targetPlan, sub.totemQuantity),
           dueAt: sub.currentPeriodEnd!,
           periodStart: sub.currentPeriodEnd!,
           periodEnd: addMonthsUtc(sub.currentPeriodEnd!, 1),
@@ -418,12 +429,16 @@ export class BillingService {
 
   private async resolveRenewalPlan(
     tenantId: string,
-    sub: Subscription & { plan: { id: string; priceCents: number }; scheduledPlan: { id: string; priceCents: number; maxPos: number; maxStores: number; maxUsers: number } | null },
-  ): Promise<{ id: string; priceCents: number }> {
+    sub: Subscription & {
+      plan: { id: string; priceCents: number; totemPriceCents: number | null };
+      scheduledPlan: { id: string; priceCents: number; totemPriceCents: number | null; maxPos: number; maxStores: number; maxUsers: number } | null;
+    },
+  ): Promise<{ id: string; priceCents: number; totemPriceCents: number | null }> {
     if (!sub.scheduledPlan) return sub.plan;
     const usage = await this.d.prisma.$transaction((tx) => getUsage(tx, tenantId));
     const excess = excessForPlan(sub.scheduledPlan, usage);
-    if (excess.length === 0) return sub.scheduledPlan;
+    const totemsBlocked = sub.totemQuantity > 0 && sub.scheduledPlan.totemPriceCents === null;
+    if (excess.length === 0 && !totemsBlocked) return sub.scheduledPlan;
     await createNotification(this.d.prisma, this.d.events, {
       tenantId,
       kind: 'subscription.downgrade_blocked',
@@ -576,6 +591,9 @@ export class BillingService {
     if (excess.length > 0) {
       throw new BillingError('PLAN_DOWNGRADE_EXCESS', 'Desative os itens excedentes antes do downgrade', excess);
     }
+    if (sub.totemQuantity > 0 && target.totemPriceCents === null) {
+      throw new BillingError('PLAN_DOWNGRADE_EXCESS', 'O plano escolhido não inclui totens. Desative os totens antes do downgrade.');
+    }
     const updated = await this.d.prisma.subscription.update({ where: { id: sub.id }, data: { scheduledPlanId: target.id } });
     await writeAudit(this.d.prisma, {
       tenantId: params.tenantId,
@@ -587,6 +605,36 @@ export class BillingService {
       after: { from: sub.planId, to: target.id, effectiveAt: sub.currentPeriodEnd },
     });
     return updated;
+  }
+
+  /**
+   * Quantidade de totens contratados. Política: o adicional passa a valer na próxima renovação
+   * (sem cobrança pró-rata). Cartão: atualiza o valor recorrente. Pix: a fatura de renovação ainda
+   * sem QR gerado é anulada e reemitida com o valor novo pelo ciclo de faturamento.
+   */
+  async setTotemQuantity(tenantId: string, quantity: number): Promise<void> {
+    const sub = await this.d.prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true } });
+    if (!sub) throw new BillingError('SUBSCRIPTION_INACTIVE', 'Assinatura não encontrada');
+    if (sub.totemQuantity === quantity) return;
+    await this.d.prisma.subscription.update({ where: { id: sub.id }, data: { totemQuantity: Math.max(0, quantity) } });
+    await this.d.prisma.invoice.updateMany({
+      where: { subscriptionId: sub.id, status: 'OPEN', kind: 'RENEWAL', providerReference: null },
+      data: { status: 'VOID' },
+    });
+    if (sub.method === 'CARD' && sub.mpPreapprovalId && sub.status === 'ACTIVE') {
+      await updatePreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId, {
+        auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(sub.plan, quantity))), currency_id: 'BRL' },
+      }).catch(async (err) => {
+        this.d.logger.error({ err: (err as Error).message, subId: sub.id }, 'falha ao atualizar valor do cartão (totens)');
+        await createNotification(this.d.prisma, this.d.events, {
+          tenantId,
+          kind: 'subscription.card_amount_failed',
+          title: 'Valor da assinatura no cartão não atualizado',
+          body: 'Não foi possível atualizar o valor do cartão após mudar a quantidade de totens. A equipe Adapter Co. foi avisada pelos registros.',
+          link: '/app/assinatura',
+        });
+      });
+    }
   }
 
   async cancel(params: { tenantId: string; actorUserId: string }): Promise<Subscription> {

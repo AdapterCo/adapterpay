@@ -44,6 +44,8 @@ const schema = z
     EVOLUTION_API_URL: z.string().url().optional(),
     EVOLUTION_API_KEY: z.string().optional(),
     EVOLUTION_INSTANCE: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional(),
+    /** Pasta das fotos de produto (volume Docker em produção). */
+    UPLOADS_DIR: z.string().min(1).default('uploads'),
     SWAGGER_USER: z.string().optional(),
     SWAGGER_PASSWORD: z.string().optional(),
     METRICS_TOKEN: z.string().optional(),

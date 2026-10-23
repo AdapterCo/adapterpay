@@ -159,6 +159,7 @@ model Tenant {
   products      Product[]
   loyaltyCustomers LoyaltyCustomer[]
   loyaltyRewards   LoyaltyReward[]
+  totemDevices     TotemDevice[]
 
   @@index([status])
   @@index([taxIdHash])
@@ -172,6 +173,8 @@ model Product {
   name       String
   /// código de barras (EAN) ou código interno, lido pelo leitor no caixa; único por empresa
   code       String?
+  /// arquivo da foto no volume de uploads (nome aleatório, ex.: 3f9c….jpg)
+  imageKey   String?  @map("image_key")
   priceCents Int      @map("price_cents")
   category   String?
   active     Boolean  @default(true)
@@ -201,6 +204,46 @@ model ChargeItem {
 
   @@index([chargeId])
   @@map("charge_items")
+}
+
+/// Totem de autoatendimento: dispositivo pareado a um POS, com credencial própria e limitada.
+model TotemDevice {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  storeId            String    @map("store_id") @db.Uuid
+  posId              String    @map("pos_id") @db.Uuid
+  /// usuário de serviço (sem login) que aparece como "vendedor" nas vendas do totem
+  userId             String    @map("user_id") @db.Uuid
+  name               String
+  /// SHA-256 do token do dispositivo (o valor só existe no cookie do totem)
+  tokenHash          String?   @unique @map("token_hash")
+  /// SHA-256 do código de pareamento de uso único
+  pairingCodeHash    String?   @unique @map("pairing_code_hash")
+  pairingExpiresAt   DateTime? @map("pairing_expires_at") @db.Timestamptz(3)
+  pairedAt           DateTime? @map("paired_at") @db.Timestamptz(3)
+  lastSeenAt         DateTime? @map("last_seen_at") @db.Timestamptz(3)
+  /// ACTIVE | REVOKED
+  status             String    @default("ACTIVE")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant  Tenant      @relation(fields: [tenantId], references: [id])
+  pos     PosTerminal @relation(fields: [posId], references: [id])
+  user    User        @relation("TotemUser", fields: [userId], references: [id])
+  charges Charge[]
+
+  @@index([tenantId, status])
+  @@map("totem_devices")
+}
+
+/// Sequência de número de pedido por loja e dia local.
+model OrderCounter {
+  storeId String @map("store_id") @db.Uuid
+  day     String
+  last    Int    @default(0)
+
+  @@id([storeId, day])
+  @@map("order_counters")
 }
 
 /// Cliente da fidelidade: só nome e WhatsApp (LGPD: dados mínimos e consentimento para mensagens).
@@ -300,6 +343,7 @@ model User {
   sessions         Session[]
   emailTokens      EmailToken[]
   charges          Charge[]           @relation("ChargeSeller")
+  totemDevices     TotemDevice[]      @relation("TotemUser")
   notifications    Notification[]
 
   @@map("users")
@@ -471,6 +515,7 @@ model PosTerminal {
   store        Store        @relation(fields: [storeId, tenantId], references: [id, tenantId])
   mpConnection MpConnection @relation(fields: [mpConnectionId, tenantId], references: [id, tenantId])
   charges      Charge[]
+  totemDevices TotemDevice[]
 
   @@unique([id, tenantId])
   @@unique([mpConnectionId, mpPosId])
@@ -527,6 +572,14 @@ model Charge {
   /// desconto de cashback aplicado (valor da cobrança já é o líquido a pagar)
   discountCents     Int              @default(0) @map("discount_cents")
   loyaltyCustomer   LoyaltyCustomer? @relation(fields: [loyaltyCustomerId], references: [id], onDelete: SetNull)
+  /// totem que criou a cobrança (autoatendimento)
+  totemId           String?          @map("totem_id") @db.Uuid
+  /// número do pedido do dia na loja (retirada/cozinha)
+  orderNumber       Int?             @map("order_number")
+  /// PREPARING | READY | DELIVERED (somente pedidos pagos com número)
+  fulfillmentStatus String?          @map("fulfillment_status")
+  fulfilledAt       DateTime?        @map("fulfilled_at") @db.Timestamptz(3)
+  totem             TotemDevice?     @relation(fields: [totemId], references: [id], onDelete: SetNull)
   pollingJob   PollingJob?
 
   @@unique([tenantId, clientRequestId])
@@ -609,6 +662,8 @@ model Plan {
   maxPos     Int      @map("max_pos")
   maxStores  Int      @map("max_stores")
   maxUsers   Int      @map("max_users")
+  /// Preço mensal de cada totem adicional; null = plano sem totem
+  totemPriceCents Int? @map("totem_price_cents")
   active     Boolean  @default(true)
   sortOrder  Int      @default(0) @map("sort_order")
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -633,6 +688,8 @@ model Subscription {
   cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
   canceledAt         DateTime?          @map("canceled_at") @db.Timestamptz(3)
   scheduledPlanId    String?            @map("scheduled_plan_id")
+  /// Totens contratados (adicional mensal por totem, cobrado a partir da próxima renovação)
+  totemQuantity      Int                @default(0) @map("totem_quantity")
   mpPreapprovalId    String?            @unique @map("mp_preapproval_id")
   preapprovalStatus  String?            @map("preapproval_status")
   nextPollAt         DateTime?          @map("next_poll_at") @db.Timestamptz(3)

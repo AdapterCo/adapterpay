@@ -16,6 +16,7 @@ import { PlansModule } from './plans/plans.module';
 import { PosModule } from './pos/pos.module';
 import { ProductsModule } from './products/products.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
+import { TotemsModule } from './totems/totems.module';
 import { PublicModule } from './public/public.module';
 import { ReportsModule } from './reports/reports.module';
 import { StoresModule } from './stores/stores.module';
@@ -36,6 +37,7 @@ import { UsersModule } from './users/users.module';
     ChargesModule,
     ProductsModule,
     LoyaltyModule,
+    TotemsModule,
     PublicModule,
     EventsModule,
     ReportsModule,
