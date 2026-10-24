@@ -97,7 +97,7 @@ export class ReportsService {
     const scope = this.scopeSql(auth, {});
     const baseWhere = { tenantId: auth.tenantId!, ...storeScope(auth) };
 
-    const [todaySummary, active, expiredToday, reconciling, byStore, byPos, bySeller, series] = await Promise.all([
+    const [todaySummary, active, expiredToday, reconciling, byStore, byPos, bySeller, recent, topProducts] = await Promise.all([
       this.summary(auth, { from: today, to: tomorrow }),
       this.deps.prisma.charge.count({ where: { ...baseWhere, status: { in: ['CREATING', 'PENDING'] } } }),
       this.deps.prisma.charge.count({ where: { ...baseWhere, status: 'EXPIRED', terminalAt: { gte: today, lt: tomorrow } } }),
@@ -105,12 +105,31 @@ export class ReportsService {
       this.grouped(auth, { from: monthAgo, to: tomorrow }, 'store_id'),
       this.grouped(auth, { from: monthAgo, to: tomorrow }, 'pos_id'),
       this.grouped(auth, { from: monthAgo, to: tomorrow }, 'seller_id'),
-      this.deps.prisma.$queryRaw<Array<{ day: string; gross: bigint | null; paid_count: bigint }>>`
-        SELECT to_char(date_trunc('day', c.paid_at AT TIME ZONE ${tenant.timezone}), 'YYYY-MM-DD') AS day,
-               SUM(c.amount_cents)::bigint AS gross, COUNT(*)::bigint AS paid_count
-        FROM charges c
-        WHERE ${scope} AND c.status = 'PAID' AND c.paid_at >= ${monthAgo} AND c.paid_at < ${tomorrow}
-        GROUP BY 1 ORDER BY 1`,
+      // Últimas vendas pagas (atualiza ao vivo no painel via evento charge.updated).
+      this.deps.prisma.charge.findMany({
+        where: { ...baseWhere, status: 'PAID' },
+        orderBy: { paidAt: 'desc' },
+        take: 8,
+        select: {
+          id: true,
+          amountCents: true,
+          paidAt: true,
+          description: true,
+          orderNumber: true,
+          pos: { select: { name: true } },
+          totem: { select: { name: true } },
+          items: { select: { name: true, quantity: true } },
+        },
+      }),
+      // Mais vendidos do mês: itens de catálogo/totem das cobranças pagas.
+      this.deps.prisma.$queryRaw<Array<{ name: string; qty: bigint; gross: bigint }>>`
+        SELECT i.name, SUM(i.quantity)::bigint AS qty, SUM(i.quantity * i.unit_price_cents)::bigint AS gross
+        FROM charge_items i
+        JOIN charges c ON c.id = i.charge_id
+        WHERE ${scope} AND c.status = 'PAID' AND c.paid_at >= ${monthStart} AND c.paid_at < ${tomorrow}
+        GROUP BY i.name
+        ORDER BY qty DESC, gross DESC
+        LIMIT 8`,
     ]);
     return {
       timezone: tenant.timezone,
@@ -128,12 +147,16 @@ export class ReportsService {
         posRateBps: tenant.savingsPosRateBps,
         linkRateBps: tenant.savingsLinkRateBps,
       },
-      last30Days: {
-        byStore,
-        byPos,
-        bySeller,
-        series: series.map((s) => ({ day: s.day, grossCents: Number(s.gross ?? 0), paidCount: Number(s.paid_count) })),
-      },
+      recentSales: recent.map((c) => ({
+        id: c.id,
+        amountCents: c.amountCents,
+        paidAt: c.paidAt,
+        orderNumber: c.orderNumber,
+        origin: c.totem?.name ?? c.pos.name,
+        summary: c.items.length ? c.items.map((i) => `${i.quantity}× ${i.name}`).join(', ') : c.description,
+      })),
+      topProducts: topProducts.map((p) => ({ name: p.name, quantity: Number(p.qty), grossCents: Number(p.gross) })),
+      last30Days: { byStore, byPos, bySeller },
     };
   }
 

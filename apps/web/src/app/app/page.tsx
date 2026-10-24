@@ -31,11 +31,12 @@ interface Dashboard {
     posRateBps: number;
     linkRateBps: number;
   };
+  recentSales: Array<{ id: string; amountCents: number; paidAt: string; orderNumber: number | null; origin: string; summary: string | null }>;
+  topProducts: Array<{ name: string; quantity: number; grossCents: number }>;
   last30Days: {
     byStore: Array<{ id: string; name: string; paidCount: number; grossCents: number }>;
     byPos: Array<{ id: string; name: string; paidCount: number; grossCents: number }>;
     bySeller: Array<{ id: string; name: string; paidCount: number; grossCents: number }>;
-    series: Array<{ day: string; grossCents: number; paidCount: number }>;
   };
 }
 
@@ -69,7 +70,6 @@ export default function DashboardPage() {
 
   const steps = onboarding.data?.steps ?? [];
   const pending = steps.filter((s) => !s.done);
-  const max = Math.max(1, ...(dash.data?.last30Days.series.map((s) => s.grossCents) ?? [1]));
 
   return (
     <>
@@ -120,25 +120,64 @@ export default function DashboardPage() {
 
           {me?.role !== 'VENDEDOR' && dash.data.savingsMonth.paidCount > 0 && <SavingsCard s={dash.data.savingsMonth} />}
 
-          <Card className="mt-6">
-            <CardHeader title="Recebimentos — últimos 30 dias" />
-            <CardBody>
-              {dash.data.last30Days.series.length === 0 ? (
-                <EmptyState title="Nenhum pagamento confirmado no período" />
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader title="Últimas vendas" description="Atualiza sozinha quando um Pix é confirmado." />
+              {dash.data.recentSales.length === 0 ? (
+                <EmptyState title="Nenhuma venda paga ainda" description="As vendas confirmadas aparecem aqui na hora." />
               ) : (
-                <div className="flex h-40 items-end gap-1" role="img" aria-label="Gráfico de recebimentos diários">
-                  {dash.data.last30Days.series.map((s) => (
-                    <div key={s.day} className="group relative flex-1">
-                      <div className="rounded-t bg-brand-500 hover:bg-brand-600" style={{ height: `${Math.max(4, (s.grossCents / max) * 150)}px` }} />
-                      <span className="pointer-events-none absolute -top-8 left-1/2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-ink px-2 py-0.5 text-[11px] text-white group-hover:block">
-                        {s.day.slice(8, 10)}/{s.day.slice(5, 7)} · {formatBRL(s.grossCents)}
-                      </span>
-                    </div>
+                <ul className="divide-y divide-slate-100">
+                  {dash.data.recentSales.map((s) => (
+                    <li key={s.id}>
+                      <Link href={`/app/cobrancas/${s.id}`} className="flex items-center gap-4 px-5 py-3 hover:bg-paper">
+                        <span className="w-12 shrink-0 text-sm tabular-nums text-slate-500">
+                          {new Date(s.paidAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: dash.data!.timezone })}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-ink">{s.summary ?? 'Valor livre'}</span>
+                          <span className="block text-xs text-slate-500">
+                            {s.origin}
+                            {s.orderNumber ? ` · pedido ${String(s.orderNumber).padStart(3, '0')}` : ''}
+                          </span>
+                        </span>
+                        <span className="text-sm font-semibold tabular-nums">{formatBRL(s.amountCents)}</span>
+                      </Link>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
-            </CardBody>
-          </Card>
+            </Card>
+
+            <Card>
+              <CardHeader title="Mais vendidos do mês" description="Produtos do catálogo e do totem." />
+              {dash.data.topProducts.length === 0 ? (
+                <EmptyState
+                  title="Ainda sem produtos vendidos"
+                  description="Cobre pelos produtos do catálogo para ver aqui o que mais sai."
+                  action={can('products:manage') ? <Link href="/app/produtos"><Button variant="secondary" size="sm">Cadastrar produtos</Button></Link> : undefined}
+                />
+              ) : (
+                <ol className="divide-y divide-slate-100">
+                  {dash.data.topProducts.map((p, i) => {
+                    const top = dash.data!.topProducts[0]!.quantity;
+                    return (
+                      <li key={p.name} className="px-5 py-3">
+                        <div className="flex items-baseline gap-3">
+                          <span className="w-5 shrink-0 text-sm tabular-nums text-slate-400">{i + 1}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm text-ink">{p.name}</span>
+                          <span className="text-sm tabular-nums text-slate-600">{p.quantity} un.</span>
+                          <span className="w-24 text-right text-sm font-semibold tabular-nums">{formatBRL(p.grossCents)}</span>
+                        </div>
+                        <div className="ml-8 mt-1.5 h-1.5 rounded-full bg-paper" aria-hidden="true">
+                          <div className="h-full rounded-full bg-brand-600" style={{ width: `${Math.max(4, (p.quantity / top) * 100)}%` }} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </Card>
+          </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-3">
             {([
