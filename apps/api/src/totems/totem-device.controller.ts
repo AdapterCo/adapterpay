@@ -177,9 +177,20 @@ export class TotemDeviceController {
       }
       loyalty = { customerId: customer.id, ...(body.loyalty.rewardCode ? { rewardCode: body.loyalty.rewardCode } : {}) };
     }
+    // O totem envia o total do carrinho (sem desconto); o cashback é descontado aqui antes de criar a cobrança.
+    let amountCents = body.amountCents;
+    if (loyalty?.rewardCode) {
+      const reward = await this.deps.prisma.loyaltyReward.findFirst({
+        where: { tenantId: d.tenantId, customerId: loyalty.customerId, code: loyalty.rewardCode, kind: 'CASHBACK', status: 'AVAILABLE' },
+        select: { valueCents: true },
+      });
+      if (!reward?.valueCents) throw Errors.validation('Código de cashback inválido, já usado ou de outro WhatsApp');
+      if (reward.valueCents >= body.amountCents) throw Errors.validation('O cashback vale mais que esta compra. Use o código numa compra maior.');
+      amountCents = body.amountCents - reward.valueCents;
+    }
     const created = await this.charges.create(
       this.authFor(d),
-      { posId: d.posId, amountCents: body.amountCents, items: body.items, ...(loyalty ? { loyalty } : {}) },
+      { posId: d.posId, amountCents, items: body.items, ...(loyalty ? { loyalty } : {}) },
       undefined,
       meta,
       { totemId: d.id },
