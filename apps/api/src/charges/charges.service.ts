@@ -48,7 +48,13 @@ export class ChargesService {
    * com exclusão mútua (lock + índice parcial), cria CREATING com referência e chave idempotente,
    * chama a Orders API e grava PENDING. O worker acompanha até o estado final.
    */
-  async create(auth: AuthContext, input: CreateChargeInput, clientRequestId: string | undefined, meta: RequestMeta, opts: { totemId?: string } = {}) {
+  async create(
+    auth: AuthContext,
+    input: CreateChargeInput,
+    clientRequestId: string | undefined,
+    meta: RequestMeta,
+    opts: { totemId?: string; tableBillId?: string; description?: string } = {},
+  ) {
     const tenantId = auth.tenantId!;
     if (clientRequestId !== undefined && !/^[A-Za-z0-9-]{8,64}$/.test(clientRequestId)) {
       throw Errors.validation('Idempotency-Key inválida');
@@ -76,6 +82,15 @@ export class ChargesService {
     }
     if (pos.mpConnection.status !== 'ACTIVE') {
       throw new AppError(409, ERROR_CODES.MP_RECONNECT_REQUIRED, 'A conta Mercado Pago deste POS precisa ser reconectada');
+    }
+    // POS de mesa ou de totem só recebe cobranças da própria mesa/totem (não conflita com o balcão).
+    if (!opts.tableBillId) {
+      const table = await this.deps.prisma.restaurantTable.findFirst({ where: { posId: pos.id, status: 'ACTIVE' }, select: { name: true } });
+      if (table) throw new AppError(422, ERROR_CODES.POS_INACTIVE, `Este POS é da ${table.name}. Use a tela de Mesas.`);
+    }
+    if (!opts.totemId) {
+      const totem = await this.deps.prisma.totemDevice.findFirst({ where: { posId: pos.id, status: 'ACTIVE' }, select: { name: true } });
+      if (totem) throw new AppError(422, ERROR_CODES.POS_INACTIVE, `Este POS é do totem "${totem.name}".`);
     }
 
     // Fidelidade: cliente identificado no caixa e, opcionalmente, um código de cashback como desconto.
@@ -120,7 +135,7 @@ export class ChargesService {
         throw new AppError(409, ERROR_CODES.CONFLICT, 'Os preços do catálogo mudaram. Confira o total e gere a cobrança de novo.', { amountCents: total - discount });
       }
     }
-    const description = input.description || (lines.length ? cartDescription(lines) : null);
+    const description = opts.description ?? (input.description || (lines.length ? cartDescription(lines) : null));
 
     let chargeId: string;
     try {
@@ -162,6 +177,7 @@ export class ChargesService {
             loyaltyRewardId: reward?.id ?? null,
             discountCents: discount,
             totemId: opts.totemId ?? null,
+            tableBillId: opts.tableBillId ?? null,
             orderNumber,
           },
         });

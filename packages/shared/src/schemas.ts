@@ -215,6 +215,21 @@ export const totemOrderSchema = z.object({
 });
 export const fulfillmentSchema = z.object({ status: z.enum(['PREPARING', 'READY', 'DELIVERED']) });
 
+/** Modo Restaurante. */
+export const tableCreateSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Informe o nome, ex.: Mesa 7').max(40),
+    /** POS existente e livre… */
+    posId: uuid.optional(),
+    /** …ou criar um POS novo no Mercado Pago nesta loja, com o nome da mesa. */
+    storeId: uuid.optional(),
+  })
+  .refine((v) => !!v.posId !== !!v.storeId, 'Escolha um POS existente ou a loja para criar um POS novo');
+export const tableBillOpenSchema = z.object({ totalCents: z.number().int().positive('Informe o valor da conta').max(MAX_CHARGE_CENTS) });
+export const tableChooseSchema = z
+  .object({ mode: z.enum(['FULL', 'SPLIT']), people: z.number().int().min(2).max(20).optional() })
+  .refine((v) => v.mode === 'FULL' || !!v.people, 'Informe em quantas pessoas a conta será dividida');
+
 export const redeemRewardSchema = z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{6}$/, 'Código inválido') });
 
 export const productInputSchema = z.object({
@@ -311,7 +326,31 @@ export const tenantSettingsSchema = z.object({
   loyaltyGiftEvery: z.number().int().min(2).max(100).optional(),
   loyaltyGiftName: z.string().trim().max(60).nullable().optional(),
   loyaltyMinPurchaseCents: z.number().int().min(0).max(MAX_CHARGE_CENTS).optional(),
+  /** Modo Restaurante (mesas com conta integral ou dividida). */
+  restaurantMode: z.boolean().optional(),
+  /** Link de avaliação no Google. Só domínios do Google (evita usar o botão para links maliciosos). */
+  googleReviewUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .refine((v) => v === '' || isGoogleReviewUrl(v), 'Use o link de avaliação do Google (ex.: https://g.page/r/…/review)')
+    .transform((v) => v || null)
+    .nullable()
+    .optional(),
 });
+
+const GOOGLE_HOSTS = ['g.page', 'maps.app.goo.gl', 'goo.gl', 'g.co'];
+/** https e host do Google (google.com, google.com.br, g.page, maps.app.goo.gl…). */
+export function isGoogleReviewUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    return GOOGLE_HOSTS.includes(h) || /(^|\.)google\.(com|com\.br)$/.test(h);
+  } catch {
+    return false;
+  }
+}
 
 export const adminTenantActionSchema = z.object({
   reason: z.string().trim().min(5).max(500),

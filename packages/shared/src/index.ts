@@ -11,3 +11,4 @@ export * from './br-states';
 export * from './savings';
 export * from './catalog';
 export * from './loyalty';
+export * from './restaurant';

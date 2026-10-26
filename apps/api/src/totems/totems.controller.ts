@@ -73,6 +73,9 @@ export class TotemsController {
     const pos = await this.deps.prisma.posTerminal.findFirst({ where: { id: body.posId, tenantId }, select: { id: true, storeId: true, status: true } });
     if (!pos) throw Errors.notFound('POS');
     if (pos.status !== 'ACTIVE') throw Errors.validation('Ative o POS antes de ligá-lo a um totem');
+    if (await this.deps.prisma.restaurantTable.findFirst({ where: { posId: pos.id, status: 'ACTIVE' }, select: { id: true } })) {
+      throw Errors.conflict('Este POS é de uma mesa. Use outro POS para o totem.');
+    }
 
     const code = newPairingCode();
     let totem;

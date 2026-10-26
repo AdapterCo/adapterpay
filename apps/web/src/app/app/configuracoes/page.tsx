@@ -30,6 +30,8 @@ interface Settings {
   loyaltyGiftEvery: number;
   loyaltyGiftName: string | null;
   loyaltyMinPurchaseCents: number;
+  googleReviewUrl: string | null;
+  restaurantMode: boolean;
   whatsappAvailable: boolean;
   lastDailyReport: { day: string; status: string; sentAt: string | null; lastError: string | null } | null;
 }
@@ -87,6 +89,8 @@ export default function SettingsPage() {
             legalName: form.legalName,
             timezone: form.timezone,
             logoUrl: form.logoUrl || null,
+            googleReviewUrl: form.googleReviewUrl?.trim() || null,
+            restaurantMode: form.restaurantMode,
             brandColor: form.brandColor || null,
             fiscalAddress: form.fiscalAddress || null,
             allowSellerCancel: form.allowSellerCancel,
@@ -182,6 +186,12 @@ export default function SettingsPage() {
           <CardHeader title="Identidade visual" description="Usada nas páginas públicas (/p e /c)." />
           <CardBody className="flex flex-col gap-3">
             <Field label="URL do logotipo (https)">{(p) => <Input {...p} type="url" placeholder="https://…" value={form.logoUrl ?? ''} onChange={(e) => setForm({ ...form, logoUrl: e.target.value })} />}</Field>
+            <Field
+              label="Link de avaliação no Google"
+              hint="Aparece para o cliente depois do pagamento aprovado. No Google Perfil da Empresa, use “Pedir avaliações” e copie o link."
+            >
+              {(p) => <Input {...p} type="url" placeholder="https://g.page/r/…/review" value={form.googleReviewUrl ?? ''} onChange={(e) => setForm({ ...form, googleReviewUrl: e.target.value })} />}
+            </Field>
             <Field label="Cor da marca">
               {(p) => (
                 <div className="flex items-center gap-2">
@@ -196,6 +206,14 @@ export default function SettingsPage() {
         <Card>
           <CardHeader title="Operação" />
           <CardBody className="flex flex-col gap-3">
+            <Checkbox
+              checked={form.restaurantMode}
+              onChange={(e) => setForm({ ...form, restaurantMode: e.target.checked })}
+              label="Modo Restaurante: mesas com QR próprio e conta paga integral ou dividida entre as pessoas"
+            />
+            {form.restaurantMode && (
+              <p className="-mt-1 text-xs text-slate-500">Depois de salvar, o menu Mesas aparece. Cada mesa usa um POS próprio (conta no limite de POS do plano). Balcão e totem continuam iguais.</p>
+            )}
             <Checkbox checked={form.allowSellerCancel} onChange={(e) => setForm({ ...form, allowSellerCancel: e.target.checked })} label="Permitir que vendedores cancelem as próprias cobranças pendentes (somente se o Mercado Pago confirmar o cancelamento)" />
           </CardBody>
         </Card>

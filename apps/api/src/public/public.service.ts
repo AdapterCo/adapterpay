@@ -24,6 +24,7 @@ export class PublicService {
       tradeName: pos.tenant.tradeName,
       logoUrl: pos.tenant.logoUrl,
       brandColor: pos.tenant.brandColor,
+      googleReviewUrl: pos.tenant.googleReviewUrl,
       posName: pos.name,
     };
   }

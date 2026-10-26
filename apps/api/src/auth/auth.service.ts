@@ -271,6 +271,7 @@ export class AuthService {
             }
           : null,
         onboarding: { mpConnected: connections > 0, hasStore: stores > 0, hasPos: pos > 0 },
+        restaurantMode: t.restaurantMode,
       };
     }
     return {

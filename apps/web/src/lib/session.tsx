@@ -26,6 +26,7 @@ export interface Me {
       cancelAtPeriodEnd: boolean;
     };
     onboarding: { mpConnected: boolean; hasStore: boolean; hasPos: boolean };
+    restaurantMode: boolean;
   };
   memberships: Array<{ tenantId: string; tradeName: string; role: TenantRole; tenantStatus: string }>;
 }

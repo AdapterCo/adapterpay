@@ -17,6 +17,7 @@ import { PosModule } from './pos/pos.module';
 import { ProductsModule } from './products/products.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { TotemsModule } from './totems/totems.module';
+import { RestaurantModule } from './restaurant/restaurant.module';
 import { PublicModule } from './public/public.module';
 import { ReportsModule } from './reports/reports.module';
 import { StoresModule } from './stores/stores.module';
@@ -38,6 +39,7 @@ import { UsersModule } from './users/users.module';
     ProductsModule,
     LoyaltyModule,
     TotemsModule,
+    RestaurantModule,
     PublicModule,
     EventsModule,
     ReportsModule,

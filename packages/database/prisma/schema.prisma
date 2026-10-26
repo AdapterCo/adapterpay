@@ -141,6 +141,10 @@ model Tenant {
   loyaltyGiftName         String? @map("loyalty_gift_name")
   /// Compra mínima (centavos) para contar na fidelidade
   loyaltyMinPurchaseCents Int     @default(0) @map("loyalty_min_purchase_cents")
+  /// Link de avaliação no Google: botão exibido ao cliente após o pagamento aprovado
+  googleReviewUrl         String? @map("google_review_url")
+  /// Modo Restaurante: mesas com POS próprio e conta integral ou dividida
+  restaurantMode          Boolean @default(false) @map("restaurant_mode")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(3)
@@ -160,6 +164,8 @@ model Tenant {
   loyaltyCustomers LoyaltyCustomer[]
   loyaltyRewards   LoyaltyReward[]
   totemDevices     TotemDevice[]
+  restaurantTables RestaurantTable[]
+  tableBills       TableBill[]
 
   @@index([status])
   @@index([taxIdHash])
@@ -234,6 +240,57 @@ model TotemDevice {
 
   @@index([tenantId, status])
   @@map("totem_devices")
+}
+
+/// Mesa do Modo Restaurante: um POS próprio (o Mercado Pago aceita uma cobrança por vez em cada POS).
+model RestaurantTable {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  storeId    String   @map("store_id") @db.Uuid
+  posId      String   @map("pos_id") @db.Uuid
+  name       String
+  /// slug aleatório da placa da mesa: /mesa/:publicSlug
+  publicSlug String   @unique @map("public_slug")
+  /// ACTIVE | ARCHIVED
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id])
+  pos    PosTerminal @relation(fields: [posId], references: [id])
+  bills  TableBill[]
+
+  @@index([tenantId, status])
+  @@map("restaurant_tables")
+}
+
+/// Conta da mesa: paga integral ou dividida em partes, uma após a outra no POS da mesa.
+model TableBill {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  tableId     String    @map("table_id") @db.Uuid
+  /// quem abriu a conta (aparece como vendedor nas cobranças da mesa)
+  openedById  String    @map("opened_by_id") @db.Uuid
+  totalCents  Int       @map("total_cents")
+  paidCents   Int       @default(0) @map("paid_cents")
+  /// FULL | SPLIT (null até o cliente escolher)
+  mode        String?
+  /// total de pessoas na divisão
+  splitCount  Int?      @map("split_count")
+  paidShares  Int       @default(0) @map("paid_shares")
+  /// OPEN | PAID | CANCELLED
+  status      String    @default("OPEN")
+  openedAt    DateTime  @default(now()) @map("opened_at") @db.Timestamptz(3)
+  closedAt    DateTime? @map("closed_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id])
+  table   RestaurantTable @relation(fields: [tableId], references: [id])
+  charges Charge[]
+
+  @@index([tenantId, status])
+  @@index([tableId, status])
+  @@map("table_bills")
 }
 
 /// Sequência de número de pedido por loja e dia local.
@@ -516,6 +573,7 @@ model PosTerminal {
   mpConnection MpConnection @relation(fields: [mpConnectionId, tenantId], references: [id, tenantId])
   charges      Charge[]
   totemDevices TotemDevice[]
+  restaurantTables RestaurantTable[]
 
   @@unique([id, tenantId])
   @@unique([mpConnectionId, mpPosId])
@@ -580,6 +638,9 @@ model Charge {
   fulfillmentStatus String?          @map("fulfillment_status")
   fulfilledAt       DateTime?        @map("fulfilled_at") @db.Timestamptz(3)
   totem             TotemDevice?     @relation(fields: [totemId], references: [id], onDelete: SetNull)
+  /// conta de mesa (Modo Restaurante) que esta cobrança paga, integral ou uma parte
+  tableBillId       String?          @map("table_bill_id") @db.Uuid
+  tableBill         TableBill?       @relation(fields: [tableBillId], references: [id], onDelete: SetNull)
   pollingJob   PollingJob?
 
   @@unique([tenantId, clientRequestId])

@@ -45,6 +45,8 @@ export class TenantsController {
       loyaltyGiftEvery: t.loyaltyGiftEvery,
       loyaltyGiftName: t.loyaltyGiftName,
       loyaltyMinPurchaseCents: t.loyaltyMinPurchaseCents,
+      googleReviewUrl: t.googleReviewUrl,
+      restaurantMode: t.restaurantMode,
       whatsappAvailable: isWhatsAppConfigured(this.deps.config),
       lastDailyReport: await this.deps.prisma.dailyReport.findFirst({
         where: { tenantId: t.id },

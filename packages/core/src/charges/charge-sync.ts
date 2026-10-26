@@ -8,6 +8,7 @@ import {
 } from '@adapterpay/shared';
 import type { EventPublisher } from '../events';
 import { applyLoyaltyOnTransition } from '../loyalty/loyalty';
+import { applyTableBillOnTransition } from '../restaurant/table-bill';
 import { createNotification } from '../notifications';
 import { redactPayload } from '../redact';
 
@@ -134,6 +135,8 @@ export async function applyChargeTransition(
 
     // Fidelidade: consome/libera o código aplicado e credita cashback ou brinde, na mesma transação.
     await applyLoyaltyOnTransition(tx, charge, previous, target);
+    // Modo Restaurante: soma o pagamento na conta da mesa e fecha a conta ao atingir 100%.
+    await applyTableBillOnTransition(tx, charge, previous, target);
 
     if (POS_RELEASING_STATUSES.includes(target)) {
       // Libera o POS somente se ele ainda aponta para esta cobrança.

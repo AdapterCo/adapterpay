@@ -10,6 +10,8 @@ export interface PublicStoreInfo {
   tradeName: string;
   logoUrl: string | null;
   brandColor: string | null;
+  /** Link de avaliação no Google (botão após o pagamento aprovado). */
+  googleReviewUrl: string | null;
 }
 
 export interface PublicActiveCharge {

@@ -16,12 +16,15 @@ interface NavItem {
   label: string;
   perm?: Permission;
   adminOnly?: boolean;
+  /** só com o Modo Restaurante ligado */
+  restaurantOnly?: boolean;
 }
 
 const NAV: NavItem[] = [
   { href: '/app', label: 'Painel' },
   { href: '/app/cobrancas/nova', label: 'Nova cobrança', perm: 'charges:create' },
   { href: '/app/cobrancas', label: 'Cobranças', perm: 'charges:read' },
+  { href: '/app/mesas', label: 'Mesas', perm: 'tables:operate', restaurantOnly: true },
   { href: '/app/pedidos', label: 'Pedidos', perm: 'orders:manage' },
   { href: '/app/produtos', label: 'Produtos', perm: 'products:manage' },
   { href: '/app/clientes', label: 'Clientes', perm: 'loyalty:manage' },
@@ -85,7 +88,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const items = NAV.filter((n) => (!n.perm || can(n.perm)) && (!n.adminOnly || me.role === 'ADMIN'));
+  const items = NAV.filter(
+    (n) => (!n.perm || can(n.perm)) && (!n.adminOnly || me.role === 'ADMIN') && (!n.restaurantOnly || !!me.tenant?.restaurantMode),
+  );
   const tenant = me.tenant;
   const sub = tenant?.subscription;
   const isActive = tenant?.status === 'ACTIVE' && sub?.status === 'ACTIVE';

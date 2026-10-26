@@ -122,6 +122,19 @@ export function PublicPayment({ kind, id }: { kind: 'pos' | 'charge'; id: string
             <h1 className="mt-4 text-2xl font-semibold text-paid">Pagamento confirmado</h1>
             {c.amountCents !== null && <p className="mt-1 text-lg tabular-nums">{formatBRL(c.amountCents)}</p>}
             <p className="mt-2 text-sm text-slate-600">Obrigado. Não é preciso pagar de novo.</p>
+            {view.googleReviewUrl && (
+              <a
+                href={view.googleReviewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-3.5 text-base font-semibold text-ink ring-1 ring-line hover:ring-brand-600"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5 text-amber-500" fill="currentColor" aria-hidden="true">
+                  <path d="m12 2.5 2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z" />
+                </svg>
+                Avaliar {view.tradeName} no Google
+              </a>
+            )}
           </>
         )}
 
