@@ -6,6 +6,7 @@ import { formatBrWhatsApp, parsePercentToBps } from '@adapterpay/shared';
 import { Alert, Badge, Button, Card, CardBody, CardHeader, Checkbox, Field, Input, PageHeader, Select, Spinner } from '@adapterpay/ui';
 import { useCritical } from '@/components/critical';
 import { CopyButton, MoneyInput } from '@/components/domain';
+import { WhatsAppConnectCard } from '@/components/whatsapp-connect';
 import { api, errorMessage } from '@/lib/api';
 import { useApi } from '@/lib/hooks';
 import { useSession } from '@/lib/session';
@@ -188,7 +189,7 @@ export default function SettingsPage() {
             <Field label="URL do logotipo (https)">{(p) => <Input {...p} type="url" placeholder="https://…" value={form.logoUrl ?? ''} onChange={(e) => setForm({ ...form, logoUrl: e.target.value })} />}</Field>
             <Field
               label="Link de avaliação no Google"
-              hint="Aparece para o cliente depois do pagamento aprovado. No Google Perfil da Empresa, use “Pedir avaliações” e copie o link."
+              hint="O botão fica sempre visível nas páginas de pagamento do balcão, dos links e das mesas (não no totem). No Google Perfil da Empresa, use “Pedir avaliações” e copie o link."
             >
               {(p) => <Input {...p} type="url" placeholder="https://g.page/r/…/review" value={form.googleReviewUrl ?? ''} onChange={(e) => setForm({ ...form, googleReviewUrl: e.target.value })} />}
             </Field>
@@ -293,11 +294,13 @@ export default function SettingsPage() {
                 {(p) => <MoneyInput {...p} valueCents={form.loyaltyMinPurchaseCents || null} onChange={(c) => setForm({ ...form, loyaltyMinPurchaseCents: c ?? 0 })} />}
               </Field>
             )}
-            {form.loyaltyMode !== 'OFF' && !form.whatsappAvailable && (
-              <p className="text-xs text-slate-500">O envio dos códigos por WhatsApp ainda não está ativo; o vendedor vê os códigos na tela de cobrança.</p>
+            {form.loyaltyMode !== 'OFF' && (
+              <p className="text-xs text-slate-500">O código aparece na tela do caixa e, com o WhatsApp da loja conectado, também chega ao cliente que aceitou receber mensagens.</p>
             )}
           </CardBody>
         </Card>
+
+        <WhatsAppConnectCard />
 
         <Card>
           <CardHeader

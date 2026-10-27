@@ -339,6 +339,21 @@ export const tenantSettingsSchema = z.object({
     .optional(),
 });
 
+/** Conectar o WhatsApp do lojista. Com número, a Evolution também gera o código de pareamento por telefone. */
+export const whatsappConnectSchema = z.object({
+  number: z
+    .string()
+    .trim()
+    .max(30)
+    .transform((v, ctx) => {
+      if (!v) return undefined;
+      const n = normalizeBrWhatsApp(v);
+      if (!n) ctx.addIssue({ code: 'custom', message: 'Informe o WhatsApp com DDD, ex.: (11) 98765-4321' });
+      return n ?? undefined;
+    })
+    .optional(),
+});
+
 const GOOGLE_HOSTS = ['g.page', 'maps.app.goo.gl', 'goo.gl', 'g.co'];
 /** https e host do Google (google.com, google.com.br, g.page, maps.app.goo.gl…). */
 export function isGoogleReviewUrl(value: string): boolean {

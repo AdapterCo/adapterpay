@@ -1,7 +1,19 @@
 import { Controller, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { isWhatsAppConfigured, sendDailyClosingTest, WhatsAppError, writeAudit, type CoreDeps } from '@adapterpay/core';
-import { ERROR_CODES, tenantSettingsSchema } from '@adapterpay/shared';
+import {
+  connectWhatsApp,
+  deleteWhatsAppInstance,
+  getWhatsAppOwnerNumber,
+  getWhatsAppState,
+  isEvolutionConfigured,
+  isWhatsAppConfigured,
+  sendDailyClosingTest,
+  tenantInstanceName,
+  WhatsAppError,
+  writeAudit,
+  type CoreDeps,
+} from '@adapterpay/core';
+import { ERROR_CODES, tenantSettingsSchema, whatsappConnectSchema } from '@adapterpay/shared';
 import type { z } from 'zod';
 import { Critical, RequirePermission } from '../auth/decorators';
 import { AppError, Errors } from '../common/errors';
@@ -74,6 +86,109 @@ export class TenantsController {
       }
       throw err;
     }
+  }
+
+  /**
+   * WhatsApp do próprio lojista, usado para enviar os códigos de fidelidade aos clientes.
+   * O estado vem da Evolution a cada consulta; a tela consulta a cada poucos segundos enquanto o QR está aberto.
+   */
+  @Get('settings/whatsapp')
+  @RequirePermission('settings:manage')
+  async whatsappStatus(@CurrentAuth() auth: AuthContext) {
+    const tenantId = requireTenant(auth);
+    const available = isEvolutionConfigured(this.deps.config);
+    const t = await this.deps.prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { whatsappInstance: true, whatsappNumber: true, whatsappConnectedAt: true },
+    });
+    if (!available || !t.whatsappInstance) return { available, status: 'DISCONNECTED' as const, number: null };
+    let state: Awaited<ReturnType<typeof getWhatsAppState>>;
+    try {
+      state = await getWhatsAppState(this.deps.config, t.whatsappInstance);
+    } catch {
+      // Evolution fora do ar: mostra o último estado conhecido.
+      return { available, status: t.whatsappConnectedAt ? ('CONNECTED' as const) : ('DISCONNECTED' as const), number: t.whatsappNumber, checkFailed: true };
+    }
+    if (state === 'open') {
+      let number = t.whatsappNumber;
+      if (!t.whatsappConnectedAt || !number) {
+        number = (await getWhatsAppOwnerNumber(this.deps.config, t.whatsappInstance).catch(() => null)) ?? number;
+        await this.deps.prisma.tenant.update({ where: { id: tenantId }, data: { whatsappConnectedAt: new Date(), whatsappNumber: number } });
+      }
+      return { available, status: 'CONNECTED' as const, number };
+    }
+    if (t.whatsappConnectedAt) await this.deps.prisma.tenant.update({ where: { id: tenantId }, data: { whatsappConnectedAt: null } });
+    return { available, status: state === 'connecting' ? ('CONNECTING' as const) : ('DISCONNECTED' as const), number: null };
+  }
+
+  /** Cria a instância do lojista (se preciso) e devolve o QR de pareamento (e o código, se informou o número). */
+  @Post('settings/whatsapp/connect')
+  @RequirePermission('settings:manage')
+  @RateLimit({ key: 'whatsapp-connect', limit: 15, windowSec: 600, by: 'user' })
+  @ApiZodBody(whatsappConnectSchema)
+  async whatsappConnect(
+    @CurrentAuth() auth: AuthContext,
+    @ZBody(whatsappConnectSchema) body: z.infer<typeof whatsappConnectSchema>,
+    @Meta() meta: RequestMeta,
+  ) {
+    const tenantId = requireTenant(auth);
+    if (!isEvolutionConfigured(this.deps.config)) throw Errors.validation('Envio por WhatsApp indisponível no momento. Avise o suporte da Adapter Co.');
+    const instance = tenantInstanceName(tenantId);
+    const t = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { whatsappInstance: true } });
+    if (t.whatsappInstance !== instance) {
+      await this.deps.prisma.tenant.update({ where: { id: tenantId }, data: { whatsappInstance: instance, whatsappNumber: null, whatsappConnectedAt: null } });
+      await writeAudit(this.deps.prisma, {
+        tenantId,
+        actorUserId: auth.userId,
+        actorType: 'USER',
+        resourceType: 'tenant',
+        resourceId: tenantId,
+        action: 'tenant.whatsapp_connect_started',
+        ip: meta.ip,
+        correlationId: meta.correlationId,
+      });
+    }
+    try {
+      return await connectWhatsApp(this.deps.config, instance, body.number);
+    } catch (err) {
+      if (err instanceof WhatsAppError) {
+        this.deps.logger.warn({ tenantId, err: err.message }, 'falha ao gerar QR do WhatsApp');
+        throw new AppError(502, ERROR_CODES.INTERNAL, 'Não foi possível gerar o QR do WhatsApp agora. Tente de novo em instantes.');
+      }
+      throw err;
+    }
+  }
+
+  /** Desconecta o WhatsApp do lojista e apaga a instância. Os códigos voltam a aparecer só na tela do caixa. */
+  @Post('settings/whatsapp/disconnect')
+  @HttpCode(204)
+  @RequirePermission('settings:manage')
+  @RateLimit({ key: 'whatsapp-disconnect', limit: 10, windowSec: 600, by: 'user' })
+  async whatsappDisconnect(@CurrentAuth() auth: AuthContext, @Meta() meta: RequestMeta): Promise<void> {
+    const tenantId = requireTenant(auth);
+    const t = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { whatsappInstance: true, whatsappNumber: true } });
+    if (!t.whatsappInstance) return;
+    try {
+      await deleteWhatsAppInstance(this.deps.config, t.whatsappInstance);
+    } catch (err) {
+      if (err instanceof WhatsAppError) {
+        this.deps.logger.warn({ tenantId, err: err.message }, 'falha ao desconectar WhatsApp');
+        throw new AppError(502, ERROR_CODES.INTERNAL, 'Não foi possível desconectar agora. Tente de novo em instantes.');
+      }
+      throw err;
+    }
+    await this.deps.prisma.tenant.update({ where: { id: tenantId }, data: { whatsappInstance: null, whatsappNumber: null, whatsappConnectedAt: null } });
+    await writeAudit(this.deps.prisma, {
+      tenantId,
+      actorUserId: auth.userId,
+      actorType: 'USER',
+      resourceType: 'tenant',
+      resourceId: tenantId,
+      action: 'tenant.whatsapp_disconnected',
+      before: { whatsappNumber: t.whatsappNumber },
+      ip: meta.ip,
+      correlationId: meta.correlationId,
+    });
   }
 
   @Patch('settings')

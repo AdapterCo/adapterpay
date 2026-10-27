@@ -6,6 +6,7 @@ import { formatBRL } from '@adapterpay/shared';
 import { Spinner } from '@adapterpay/ui';
 import { Logo, SIGNATURE } from '@/components/brand';
 import { CopyButton } from '@/components/domain';
+import { GoogleReviewButton } from '@/components/google-review';
 import { PlateQr } from '@/components/plate';
 import { ApiError } from '@/lib/api';
 
@@ -135,7 +136,7 @@ export default function TablePage() {
   const mine = !!c && c.id === myCharge;
 
   return (
-    <Shell style={style}>
+    <Shell style={style} after={<GoogleReviewButton url={view.googleReviewUrl} tradeName={view.tradeName} className="mt-4" />}>
       <div className="w-full text-left">
         <p className="text-sm text-slate-500">{view.tradeName}</p>
         <p className="text-3xl font-semibold leading-tight text-ink">{view.tableName}</p>
@@ -176,7 +177,6 @@ export default function TablePage() {
                 <svg viewBox="0 0 24 24" className="h-9 w-9" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" /></svg>
               </span>
               <h1 className="mt-4 text-2xl font-semibold text-paid">Mesa paga. Obrigado!</h1>
-              <ReviewButton view={view} />
             </section>
           ) : c ? (
             <section className="mt-6 flex w-full flex-col items-center" aria-live="polite">
@@ -244,7 +244,6 @@ export default function TablePage() {
               {myPaid && (
                 <div className="mb-4 rounded-xl bg-emerald-50 px-4 py-3 text-left text-paid">
                   <p className="font-semibold">Sua parte foi paga. Obrigado!</p>
-                  <ReviewButton view={view} compact />
                 </div>
               )}
               {b.share ? (
@@ -270,28 +269,12 @@ export default function TablePage() {
   );
 }
 
-function ReviewButton({ view, compact = false }: { view: TableView; compact?: boolean }) {
-  if (!view.googleReviewUrl) return null;
-  return (
-    <a
-      href={view.googleReviewUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`${compact ? 'mt-2 text-sm' : 'mt-6 w-full py-3.5 text-base'} inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 font-semibold text-ink ring-1 ring-line hover:ring-brand-600`}
-    >
-      <svg viewBox="0 0 24 24" className="h-5 w-5 text-amber-500" fill="currentColor" aria-hidden="true">
-        <path d="m12 2.5 2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z" />
-      </svg>
-      Avaliar {view.tradeName} no Google
-    </a>
-  );
-}
-
-function Shell({ children, style }: { children: React.ReactNode; style?: CSSProperties }) {
+function Shell({ children, style, after }: { children: React.ReactNode; style?: CSSProperties; after?: React.ReactNode }) {
   return (
     <div style={style} className="flex min-h-dvh flex-col bg-paper">
       <main id="conteudo" className="mx-auto w-full max-w-md flex-1 px-4 py-6">
         <div className="flex flex-col items-center rounded-2xl bg-white p-5 text-center shadow-sm ring-1 ring-line">{children}</div>
+        {after}
         <p className="mt-4 text-center text-xs text-slate-500">Pagamento recebido pelo Mercado Pago na conta do estabelecimento. Comprovante sem valor fiscal.</p>
       </main>
       <footer className="flex flex-col items-center gap-1 pb-6 text-xs text-slate-400">

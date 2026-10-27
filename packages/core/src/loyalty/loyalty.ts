@@ -11,7 +11,7 @@ import {
 } from '@adapterpay/shared';
 import type { CoreDeps } from '../context';
 import { createNotification } from '../notifications';
-import { isWhatsAppConfigured, sendWhatsAppText } from '../whatsapp/evolution';
+import { getWhatsAppState, isEvolutionConfigured, sendWhatsAppTextFrom } from '../whatsapp/evolution';
 
 /**
  * Fidelidade ligada ao ciclo da cobrança. Roda DENTRO da transação de applyChargeTransition,
@@ -159,9 +159,13 @@ async function accrue(tx: Prisma.TransactionClient, charge: ChargeForLoyalty): P
   });
 }
 
-/** Job do worker: avisa por WhatsApp os clientes que ganharam recompensa (somente com consentimento). */
+/**
+ * Job do worker: avisa por WhatsApp os clientes que ganharam recompensa (somente com consentimento).
+ * A mensagem sai do WhatsApp conectado pelo próprio lojista; sem número conectado, o código fica
+ * só na tela do caixa. A instância fixa da plataforma não é usada aqui (ela é do fechamento de caixa).
+ */
 export async function runLoyaltyNotifications(deps: CoreDeps): Promise<{ sent: number; failed: number }> {
-  if (!isWhatsAppConfigured(deps.config)) return { sent: 0, failed: 0 };
+  if (!isEvolutionConfigured(deps.config)) return { sent: 0, failed: 0 };
   const rewards = await deps.prisma.loyaltyReward.findMany({
     where: {
       notifiedAt: null,
@@ -169,10 +173,11 @@ export async function runLoyaltyNotifications(deps: CoreDeps): Promise<{ sent: n
       notifyAttempts: { lt: NOTIFY_MAX_ATTEMPTS },
       createdAt: { gte: new Date(Date.now() - NOTIFY_WINDOW_MS) },
       customer: { whatsappOptIn: true },
+      tenant: { whatsappInstance: { not: null }, whatsappConnectedAt: { not: null } },
     },
     include: {
       customer: { select: { name: true, phone: true } },
-      tenant: { select: { tradeName: true, loyaltyGiftEvery: true } },
+      tenant: { select: { tradeName: true, loyaltyGiftEvery: true, whatsappInstance: true } },
     },
     orderBy: { createdAt: 'asc' },
     take: 50,
@@ -186,9 +191,11 @@ export async function runLoyaltyNotifications(deps: CoreDeps): Promise<{ sent: n
       data: { notifyAttempts: { increment: 1 } },
     });
     if (claimed.count !== 1) continue;
+    const instance = r.tenant.whatsappInstance!;
     try {
-      await sendWhatsAppText(
+      await sendWhatsAppTextFrom(
         deps.config,
+        instance,
         r.customer.phone,
         rewardMessage({
           customerName: r.customer.name,
@@ -205,6 +212,13 @@ export async function runLoyaltyNotifications(deps: CoreDeps): Promise<{ sent: n
     } catch (err) {
       failed++;
       deps.logger.warn({ rewardId: r.id, err: (err as Error).message }, 'aviso de fidelidade não enviado');
+      // WhatsApp do lojista caiu (desconectado no celular): marca como desconectado e devolve a
+      // tentativa, para o código sair quando ele reconectar (dentro da janela de envio).
+      const state = await getWhatsAppState(deps.config, instance).catch(() => null);
+      if (state && state !== 'open') {
+        await deps.prisma.tenant.updateMany({ where: { id: r.tenantId, whatsappInstance: instance }, data: { whatsappConnectedAt: null } });
+        await deps.prisma.loyaltyReward.update({ where: { id: r.id }, data: { notifyAttempts: { decrement: 1 } } });
+      }
     }
   }
   return { sent, failed };

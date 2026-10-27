@@ -145,6 +145,12 @@ model Tenant {
   googleReviewUrl         String? @map("google_review_url")
   /// Modo Restaurante: mesas com POS próprio e conta integral ou dividida
   restaurantMode          Boolean @default(false) @map("restaurant_mode")
+  /// WhatsApp próprio do lojista (instância na Evolution, nome gerado pelo servidor) para enviar códigos de fidelidade.
+  /// O fechamento de caixa continua saindo pela instância fixa da plataforma (EVOLUTION_INSTANCE).
+  whatsappInstance        String?   @unique @map("whatsapp_instance")
+  /// Número conectado, só dígitos com DDI; preenchido quando a instância fica "open"
+  whatsappNumber          String?   @map("whatsapp_number")
+  whatsappConnectedAt     DateTime? @map("whatsapp_connected_at") @db.Timestamptz(3)
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(3)

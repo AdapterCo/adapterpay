@@ -42,6 +42,13 @@ Copie `backups/` para armazenamento externo (ex.: `rclone copy backups remote:ad
 - **Pedidos:** compras do totem e do catálogo recebem número do dia por loja e aparecem em painel › Pedidos (em preparo → pronto → entregue).
 - **Fotos:** ficam no volume `uploads` da API e entram no `backup.sh` (`adapterpay-<data>-uploads.tgz`). Para restaurar: `docker compose -f docker-compose.prod.yml exec -T api tar -xzf - -C /app < backups/<arquivo>-uploads.tgz`.
 
+## WhatsApp (Evolution API)
+
+- **Instância da plataforma** (`EVOLUTION_INSTANCE` no `.env`): só envia o fechamento de caixa diário.
+- **Instância de cada lojista**: criada pelo próprio lojista em Configurações › WhatsApp da loja (QR Code ou código por número). O nome é `ap-<id do tenant>`, gerado pelo servidor com a mesma `EVOLUTION_API_KEY`. Os códigos de cashback e brinde saem apenas desse número; sem número conectado, o código fica só na tela do caixa.
+- Se o lojista desconectar pelo celular, o próximo envio falho marca a loja como desconectada e o aviso volta para a fila (até 2 dias), saindo quando ele reconectar.
+- "Desconectar WhatsApp" no painel faz logout e apaga a instância na Evolution.
+
 ## Observabilidade e alertas
 
 - Logs JSON com `correlation_id` (header `X-Request-Id`).
