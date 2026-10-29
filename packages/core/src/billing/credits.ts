@@ -17,11 +17,18 @@ export function generateReferralCode(): string {
   return code;
 }
 
-/** Código livre (consulta antes de inserir: um erro de unicidade abortaria a transação). */
+/**
+ * Código livre entre lojistas E parceiros (os dois usam o mesmo campo no cadastro).
+ * Consulta antes de inserir: um erro de unicidade abortaria a transação.
+ */
 export async function uniqueReferralCode(tx: TxClient): Promise<string> {
   for (let i = 0; i < 8; i++) {
     const code = generateReferralCode();
-    if (!(await tx.tenant.findUnique({ where: { referralCode: code }, select: { id: true } }))) return code;
+    const [tenant, partner] = await Promise.all([
+      tx.tenant.findUnique({ where: { referralCode: code }, select: { id: true } }),
+      tx.referralPartner.findUnique({ where: { code }, select: { id: true } }),
+    ]);
+    if (!tenant && !partner) return code;
   }
   throw new Error('Não foi possível gerar um código de indicação livre');
 }
@@ -59,6 +66,11 @@ export async function applyCreditsOnInvoicePaid(tx: TxClient, invoice: Invoice):
   }
 
   if (invoice.kind !== 'INITIAL') return;
+  // Indicado por um parceiro (sem conta): a comissão passa a "a receber" uma única vez.
+  await tx.partnerReferral.updateMany({
+    where: { tenantId: invoice.tenantId, status: 'REGISTERED' },
+    data: { status: 'EARNED', amountCents: REFERRAL_BONUS_CENTS, earnedAt: new Date() },
+  });
   const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: invoice.tenantId }, select: { tradeName: true, referredByTenantId: true } });
   if (!tenant.referredByTenantId) return;
   const rewarded = await tx.billingCredit.findFirst({ where: { kind: 'REFERRAL_BONUS', referredTenantId: invoice.tenantId }, select: { id: true } });

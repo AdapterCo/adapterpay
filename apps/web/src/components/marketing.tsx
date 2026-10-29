@@ -41,6 +41,7 @@ export function MarketingFooter() {
         </div>
         <nav aria-label="Rodapé" className="flex flex-wrap gap-4 text-sm text-slate-600">
           <Link href="/planos" className="hover:text-ink">Planos</Link>
+          <Link href="/indique" className="hover:text-ink">Indique e ganhe</Link>
           <Link href="/termos" className="hover:text-ink">Termos de uso</Link>
           <Link href="/privacidade" className="hover:text-ink">Política de privacidade</Link>
           <Link href="/login" className="hover:text-ink">Entrar</Link>

@@ -23,3 +23,11 @@ Usa o checkout oficial `preapproval` (`init_point`), sem PAN/CVV no AdapterPay. 
 - **Quem indicou** recebe R$ 10,00 de crédito por indicado, quando o indicado paga a primeira mensalidade (`billing_credits` com unicidade por tipo e indicado: o bônus nunca se repete).
 - Créditos: saldo em `tenants.billing_credit_cents`, extrato em `billing_credits`. Ao emitir uma fatura Pix, o desconto fica reservado nela (`invoices.credit_applied_cents`, `amount_cents` já líquido) e só sai do saldo quando ela é paga; fatura anulada libera a reserva. A fatura nunca fica abaixo de R$ 1,00; o restante do crédito vale nos meses seguintes.
 - Cartão: o crédito reduz o valor recorrente do `preapproval` para a próxima cobrança (`subscriptions.card_credit_cents`); a cobrança reduzida é reconhecida pelo polling e, depois dela, o valor volta ao normal.
+
+### Parceiros de indicação (sem conta)
+
+- Qualquer pessoa se cadastra em `/indique` com nome, WhatsApp e chave Pix (chave criptografada) e recebe um link/código no mesmo formato dos lojistas.
+- O painel do parceiro fica em `/indique/painel/<token>` (link secreto; só o hash do token é guardado). Mostra cadastros feitos com o link, quantos pagaram, valor a receber e pagamentos já feitos; os nomes das empresas aparecem abreviados.
+- WhatsApp já cadastrado em `/indique`: um link novo do painel é enviado ao próprio WhatsApp (instância da plataforma) e só então o anterior deixa de valer.
+- O indicado ganha o mesmo desconto de R$ 10,00 uma única vez. A comissão de R$ 10,00 passa a "a receber" quando o indicado paga a primeira mensalidade (`partner_referrals`: REGISTERED → EARNED → PAID_OUT).
+- Pagamento: superadmin › Parceiros mostra a chave Pix e o valor; a equipe faz o Pix pelo banco e clica em "Registrar Pix" (quita as indicações a receber, audita e avisa o parceiro por WhatsApp). "Bloquear" faz o código deixar de valer em novos cadastros.

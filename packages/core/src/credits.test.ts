@@ -8,6 +8,7 @@ type Row = Record<string, unknown>;
 function fakeDb(tenants: Record<string, Row>) {
   const credits: Row[] = [];
   const notifications: Row[] = [];
+  const partnerReferrals: Row[] = [];
   const matches = (row: Row, where: Row) => Object.entries(where).every(([k, v]) => row[k] === v);
   const tx = {
     billingCredit: {
@@ -32,8 +33,15 @@ function fakeDb(tenants: Record<string, Row>) {
       return 1;
     },
     notification: { create: async ({ data }: { data: Row }) => { notifications.push(data); return { id: 'n', ...data }; } },
+    partnerReferral: {
+      updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+        const rows = partnerReferrals.filter((r) => matches(r, where));
+        rows.forEach((r) => Object.assign(r, data));
+        return { count: rows.length };
+      },
+    },
   };
-  return { tx: tx as unknown as Prisma.TransactionClient, credits, notifications };
+  return { tx: tx as unknown as Prisma.TransactionClient, credits, notifications, partnerReferrals };
 }
 
 const invoice = (over: Partial<Invoice>) => ({ id: 'inv1', tenantId: 'novo', kind: 'INITIAL', creditAppliedCents: 0, amountCents: 1990, ...over }) as Invoice;
@@ -62,6 +70,17 @@ describe('créditos de indicação', () => {
     // Outra fatura inicial paga (ex.: reativação) não gera um segundo bônus.
     await applyCreditsOnInvoicePaid(db.tx, invoice({ id: 'inv2' }));
     expect(tenants.padrinho.billingCreditCents).toBe(1000);
+  });
+
+  it('parceiro sem conta: a comissão vira "a receber" no primeiro pagamento, uma única vez', async () => {
+    const tenants = { novo: { id: 'novo', tradeName: 'Café Novo', referredByTenantId: null, billingCreditCents: 0 } };
+    const db = fakeDb(tenants);
+    db.partnerReferrals.push({ tenantId: 'novo', status: 'REGISTERED', amountCents: 0 });
+    await applyCreditsOnInvoicePaid(db.tx, invoice({}));
+    expect(db.partnerReferrals[0]).toMatchObject({ status: 'EARNED', amountCents: 1000 });
+    db.partnerReferrals[0]!.status = 'PAID_OUT';
+    await applyCreditsOnInvoicePaid(db.tx, invoice({ id: 'inv2' }));
+    expect(db.partnerReferrals[0]!.status).toBe('PAID_OUT');
   });
 
   it('renovação não gera bônus para quem indicou', async () => {

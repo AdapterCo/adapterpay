@@ -157,6 +157,8 @@ model Tenant {
   referredByTenantId      String?   @map("referred_by_tenant_id") @db.Uuid
   /// Saldo de créditos (indicação) abatido nas próximas mensalidades
   billingCreditCents      Int       @default(0) @map("billing_credit_cents")
+  /// Parceiro de indicação (sem conta) que trouxe este lojista; definido só no cadastro
+  referredByPartnerId     String?   @map("referred_by_partner_id") @db.Uuid
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(3)
@@ -181,6 +183,8 @@ model Tenant {
   referredBy       Tenant?   @relation("TenantReferrals", fields: [referredByTenantId], references: [id])
   referrals        Tenant[]  @relation("TenantReferrals")
   billingCredits   BillingCredit[]
+  referredByPartner ReferralPartner? @relation(fields: [referredByPartnerId], references: [id])
+  partnerReferral   PartnerReferral?
 
   @@index([status])
   @@index([taxIdHash])
@@ -204,6 +208,67 @@ model BillingCredit {
   @@unique([kind, referredTenantId])
   @@index([tenantId, createdAt])
   @@map("billing_credits")
+}
+
+/// Parceiro de indicação: divulga o AdapterPay sem ter conta e recebe por Pix (pago pela Adapter Co.).
+/// O painel dele é acessado por um link secreto (só o hash do token fica no banco).
+model ReferralPartner {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  /// WhatsApp, só dígitos com DDI (5511987654321)
+  phone           String   @unique
+  pixKeyType      String   @map("pix_key_type")
+  /// Chave Pix criptografada (dado pessoal); só o superadmin vê inteira para pagar
+  pixKeyEnc       String   @map("pix_key_enc")
+  code            String   @unique
+  accessTokenHash String   @unique @map("access_token_hash")
+  /// ACTIVE | BLOCKED (bloqueado: o código deixa de valer em novos cadastros)
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenants   Tenant[]
+  referrals PartnerReferral[]
+  payouts   PartnerPayout[]
+
+  @@map("referral_partners")
+}
+
+/// Um lojista cadastrado com o código do parceiro. REGISTERED (cadastrou) → EARNED (pagou a 1ª
+/// mensalidade: comissão a receber) → PAID_OUT (a Adapter Co. fez o Pix ao parceiro).
+model PartnerReferral {
+  id          String    @id @default(uuid()) @db.Uuid
+  partnerId   String    @map("partner_id") @db.Uuid
+  tenantId    String    @unique @map("tenant_id") @db.Uuid
+  status      String    @default("REGISTERED")
+  amountCents Int       @default(0) @map("amount_cents")
+  earnedAt    DateTime? @map("earned_at") @db.Timestamptz(3)
+  payoutId    String?   @map("payout_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  partner ReferralPartner @relation(fields: [partnerId], references: [id])
+  tenant  Tenant          @relation(fields: [tenantId], references: [id])
+  payout  PartnerPayout?  @relation(fields: [payoutId], references: [id])
+
+  @@index([partnerId, status])
+  @@map("partner_referrals")
+}
+
+/// Pix feito ao parceiro (registrado pelo superadmin), com as indicações que ele quitou.
+model PartnerPayout {
+  id          String   @id @default(uuid()) @db.Uuid
+  partnerId   String   @map("partner_id") @db.Uuid
+  amountCents Int      @map("amount_cents")
+  count       Int
+  note        String?
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  paidAt      DateTime @default(now()) @map("paid_at") @db.Timestamptz(3)
+
+  partner   ReferralPartner   @relation(fields: [partnerId], references: [id])
+  referrals PartnerReferral[]
+
+  @@index([partnerId, paidAt])
+  @@map("partner_payouts")
 }
 
 /// Catálogo de produtos da empresa (cobrança rápida). Preço é sempre o do servidor.

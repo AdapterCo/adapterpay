@@ -72,18 +72,28 @@ export class AuthService {
 
     const taxIdHash = hmacSha256Hex(this.deps.config.SESSION_SECRET, input.taxId);
     // Indicação: só no cadastro, e nunca do próprio documento (evita indicar a si mesmo).
+    // O código pode ser de outro lojista (ganha crédito) ou de um parceiro sem conta (ganha por Pix).
     let referrerId: string | null = null;
+    let partnerId: string | null = null;
     if (input.referralCode) {
       const referrer = await this.deps.prisma.tenant.findUnique({
         where: { referralCode: input.referralCode },
         select: { id: true, taxIdHash: true, deletedAt: true },
       });
-      if (!referrer || referrer.deletedAt) throw Errors.validation('Código de indicação não encontrado. Confira o código ou deixe o campo em branco.');
-      if (referrer.taxIdHash === taxIdHash) throw Errors.validation('Não é possível usar o seu próprio código de indicação.');
+      const partner = referrer
+        ? null
+        : await this.deps.prisma.referralPartner.findUnique({ where: { code: input.referralCode }, select: { id: true, status: true } });
+      if ((!referrer || referrer.deletedAt) && (!partner || partner.status !== 'ACTIVE')) {
+        throw Errors.validation('Código de indicação não encontrado. Confira o código ou deixe o campo em branco.');
+      }
+      if (referrer && referrer.taxIdHash === taxIdHash) throw Errors.validation('Não é possível usar o seu próprio código de indicação.');
       // O desconto de indicação vale uma vez por CPF/CNPJ, mesmo que a empresa abra outra conta.
-      const alreadyReferred = await this.deps.prisma.tenant.count({ where: { taxIdHash, referredByTenantId: { not: null } } });
+      const alreadyReferred = await this.deps.prisma.tenant.count({
+        where: { taxIdHash, OR: [{ referredByTenantId: { not: null } }, { referredByPartnerId: { not: null } }] },
+      });
       if (alreadyReferred > 0) throw Errors.validation('Este CPF/CNPJ já usou um código de indicação. O desconto vale uma única vez.');
-      referrerId = referrer.id;
+      referrerId = referrer && !referrer.deletedAt ? referrer.id : null;
+      partnerId = partner?.id ?? null;
     }
 
     const passwordHash = await hashPassword(input.password);
@@ -99,9 +109,12 @@ export class AuthService {
             status: 'PENDING_ACTIVATION',
             referralCode: await uniqueReferralCode(tx),
             referredByTenantId: referrerId,
+            referredByPartnerId: partnerId,
           },
         });
-        if (referrerId) await grantWelcomeCredit(tx, tenant.id);
+        if (referrerId || partnerId) await grantWelcomeCredit(tx, tenant.id);
+        // Conta no painel do parceiro desde o cadastro; a comissão vale quando a 1ª mensalidade for paga.
+        if (partnerId) await tx.partnerReferral.create({ data: { partnerId, tenantId: tenant.id } });
         const u = await tx.user.create({
           data: { email: input.email, name: input.adminName, passwordHash, status: 'ACTIVE', emailVerifiedAt: new Date() },
         });
@@ -117,7 +130,7 @@ export class AuthService {
           resourceType: 'tenant',
           resourceId: tenant.id,
           action: 'tenant.registered',
-          after: { tradeName: tenant.tradeName, planId: plan.id, referredByTenantId: referrerId },
+          after: { tradeName: tenant.tradeName, planId: plan.id, referredByTenantId: referrerId, referredByPartnerId: partnerId },
           ip: meta.ip,
           userAgent: meta.userAgent,
           correlationId: meta.correlationId,

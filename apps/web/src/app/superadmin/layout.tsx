@@ -14,6 +14,7 @@ const NAV = [
   { href: '/superadmin/tenants', label: 'Tenants' },
   { href: '/superadmin/assinaturas', label: 'Assinaturas e pagamentos' },
   { href: '/superadmin/planos', label: 'Planos e preços' },
+  { href: '/superadmin/parceiros', label: 'Parceiros' },
   { href: '/superadmin/auditoria', label: 'Auditoria' },
 ];
 
