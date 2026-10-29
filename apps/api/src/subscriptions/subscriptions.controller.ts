@@ -46,10 +46,11 @@ export class SubscriptionsController {
       where: { tenantId, status: 'OPEN' },
       orderBy: { dueAt: 'asc' },
     });
-    const tenant = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { status: true, suspendedReason: true } });
+    const tenant = await this.deps.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { status: true, suspendedReason: true, billingCreditCents: true } });
     return {
       tenantStatus: tenant.status,
       suspendedReason: tenant.suspendedReason,
+      creditCents: tenant.billingCreditCents,
       subscription: sub && {
         id: sub.id,
         status: sub.status,
@@ -150,6 +151,7 @@ export class SubscriptionsController {
     status: string;
     method: string;
     amountCents: number;
+    creditAppliedCents: number;
     dueAt: Date;
     paidAt: Date | null;
     pixQrCode: string | null;
@@ -166,6 +168,7 @@ export class SubscriptionsController {
       method: i.method,
       planId: i.planId,
       amountCents: i.amountCents,
+      creditAppliedCents: i.creditAppliedCents,
       dueAt: i.dueAt,
       paidAt: i.paidAt,
       providerStatus: i.providerStatus,

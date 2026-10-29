@@ -18,6 +18,7 @@ export * from './charges/fees';
 export * from './pos/pos-sync';
 export * from './billing/billing-service';
 export * from './billing/periods';
+export * from './billing/credits';
 export * from './whatsapp/evolution';
 export * from './reports/daily-closing';
 export * from './loyalty/loyalty';

@@ -15,3 +15,11 @@ Implementação: `packages/core/src/billing/billing-service.ts`. Cobrança na co
 ## Cartão recorrente — limitação a validar (seção 20, item 2)
 
 Usa o checkout oficial `preapproval` (`init_point`), sem PAN/CVV no AdapterPay. A confirmação de pagamentos de renovação depende de `GET /authorized_payments/search?preapproval_id=` retornar `status=processed` e `payment.status=approved`. **Não foi comprovado** que esse endpoint reflita todas as renovações, falhas e retentativas sem webhook. Até essa validação, **não se deve afirmar automação integral do cartão**: o painel do superadmin mostra `preapproval_status` e faturas para acompanhamento, e a suspensão por período vencido continua ativa.
+
+## Indicação de lojistas
+
+- Cada lojista tem um código de 8 caracteres e o link `/cadastro?ref=CÓDIGO` (painel › Indicações).
+- **Quem se cadastra com o código** recebe R$ 10,00 de crédito **uma única vez**, abatido na primeira mensalidade. O código só pode ser informado no cadastro, não vale para o próprio CPF/CNPJ e não vale de novo para um CPF/CNPJ que já usou indicação (mesmo em outra conta).
+- **Quem indicou** recebe R$ 10,00 de crédito por indicado, quando o indicado paga a primeira mensalidade (`billing_credits` com unicidade por tipo e indicado: o bônus nunca se repete).
+- Créditos: saldo em `tenants.billing_credit_cents`, extrato em `billing_credits`. Ao emitir uma fatura Pix, o desconto fica reservado nela (`invoices.credit_applied_cents`, `amount_cents` já líquido) e só sai do saldo quando ela é paga; fatura anulada libera a reserva. A fatura nunca fica abaixo de R$ 1,00; o restante do crédito vale nos meses seguintes.
+- Cartão: o crédito reduz o valor recorrente do `preapproval` para a próxima cobrança (`subscriptions.card_credit_cents`); a cobrança reduzida é reconhecida pelo polling e, depois dela, o valor volta ao normal.

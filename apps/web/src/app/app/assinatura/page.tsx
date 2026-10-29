@@ -37,8 +37,9 @@ interface Current {
   };
   usage: { pos: number; stores: number; users: number };
   limits: { pos: number; stores: number; users: number } | null;
-  openInvoices: Array<{ id: string; kind: string; amountCents: number; dueAt: string; method: string }>;
+  openInvoices: Array<{ id: string; kind: string; amountCents: number; creditAppliedCents: number; dueAt: string; method: string }>;
   billingTimezone: string;
+  creditCents: number;
 }
 
 const KIND: Record<string, string> = { INITIAL: 'Contratação', RENEWAL: 'Renovação', UPGRADE: 'Upgrade (pró-rata)' };
@@ -48,7 +49,7 @@ export default function SubscriptionPage() {
   const critical = useCritical();
   const cur = useApi<Current>('/subscriptions/current');
   const plans = useApi<Plan[]>('/plans');
-  const invoices = useApi<Array<{ id: string; kind: string; status: string; method: string; amountCents: number; dueAt: string; paidAt: string | null; planName: string }>>('/subscriptions/invoices');
+  const invoices = useApi<Array<{ id: string; kind: string; status: string; method: string; amountCents: number; creditAppliedCents: number; dueAt: string; paidAt: string | null; planName: string }>>('/subscriptions/invoices');
   const [payInvoice, setPayInvoice] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,10 +176,17 @@ export default function SubscriptionPage() {
         <Card>
           <CardHeader title="Faturas em aberto" />
           <CardBody className="space-y-3">
+            {cur.data.creditCents > 0 && (
+              <p className="rounded-lg bg-emerald-50 p-3 text-sm text-paid">
+                Você tem <strong className="tabular-nums">{formatBRL(cur.data.creditCents)}</strong> de crédito de indicação, descontado nas próximas mensalidades.{' '}
+                <Link href="/app/indicacoes" className="underline">Ver indicações</Link>
+              </p>
+            )}
             {cur.data.openInvoices.length === 0 && <p className="text-sm text-slate-500">Nenhuma fatura em aberto.</p>}
             {cur.data.openInvoices.map((i) => (
               <div key={i.id} className="rounded-lg border border-slate-200 p-3">
                 <p className="text-sm font-medium">{KIND[i.kind] ?? i.kind} · {formatBRL(i.amountCents)}</p>
+                {i.creditAppliedCents > 0 && <p className="text-xs text-paid">Crédito de indicação: −{formatBRL(i.creditAppliedCents)}</p>}
                 <p className="text-xs text-slate-500">Vence em {formatDateTime(i.dueAt, cur.data!.billingTimezone)}</p>
                 {i.method === 'PIX' && can('subscription:manage') && <Button size="sm" className="mt-2" onClick={() => setPayInvoice(i.id)}>Pagar com Pix</Button>}
               </div>
@@ -220,7 +228,10 @@ export default function SubscriptionPage() {
                 <Td>{KIND[i.kind] ?? i.kind}</Td>
                 <Td>{i.planName}</Td>
                 <Td>{i.method === 'PIX' ? 'Pix' : 'Cartão'}</Td>
-                <Td className="text-right tabular-nums">{formatBRL(i.amountCents)}</Td>
+                <Td className="text-right tabular-nums">
+                  {formatBRL(i.amountCents)}
+                  {i.creditAppliedCents > 0 && <span className="block text-xs text-paid">crédito −{formatBRL(i.creditAppliedCents)}</span>}
+                </Td>
                 <Td>{formatDateTime(i.dueAt)}</Td>
                 <Td>{formatDateTime(i.paidAt)}</Td>
                 <Td><Badge tone={i.status === 'PAID' ? 'success' : i.status === 'OPEN' ? 'info' : 'neutral'}>{i.status === 'PAID' ? 'Paga' : i.status === 'OPEN' ? 'Aberta' : i.status === 'VOID' ? 'Anulada' : 'Falhou'}</Badge></Td>

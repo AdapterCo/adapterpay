@@ -36,6 +36,7 @@ const NAV: NavItem[] = [
   { href: '/app/usuarios', label: 'Usuários', perm: 'users:manage' },
   { href: '/app/integracoes/mercado-pago', label: 'Mercado Pago', perm: 'mp:manage' },
   { href: '/app/assinatura', label: 'Assinatura', perm: 'subscription:read' },
+  { href: '/app/indicacoes', label: 'Indicações', perm: 'subscription:read' },
   { href: '/app/configuracoes', label: 'Configurações', perm: 'settings:manage' },
   { href: '/app/auditoria', label: 'Auditoria', perm: 'audit:read' },
 ];

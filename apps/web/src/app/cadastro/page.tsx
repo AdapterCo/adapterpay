@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
-import { formatBRL, registerSchema } from '@adapterpay/shared';
+import { formatBRL, isReferralCode, normalizeReferralCode, REFERRAL_WELCOME_CENTS, registerSchema } from '@adapterpay/shared';
 import { Alert, Button, Checkbox, Field, Input, Select } from '@adapterpay/ui';
 import { AuthShell } from '@/components/auth-shell';
 import { api, errorMessage, resetCsrf } from '@/lib/api';
@@ -13,6 +13,8 @@ interface Plan {
   name: string;
   priceCents: number;
 }
+
+const REF_KEY = 'adapterpay:indicacao';
 
 function RegisterForm() {
   const params = useSearchParams();
@@ -27,6 +29,7 @@ function RegisterForm() {
     email: '',
     password: '',
     acceptTerms: false,
+    referralCode: normalizeReferralCode(params.get('ref') ?? ''),
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +38,22 @@ function RegisterForm() {
   useEffect(() => {
     api<Plan[]>('/plans').then(setPlans).catch(() => setPlans([]));
   }, []);
+
+  // Guarda o código do link de indicação: quem passa pelos planos antes de se cadastrar não o perde.
+  useEffect(() => {
+    try {
+      const fromLink = normalizeReferralCode(params.get('ref') ?? '');
+      if (fromLink) window.localStorage.setItem(REF_KEY, fromLink);
+      else {
+        const saved = window.localStorage.getItem(REF_KEY);
+        if (saved) setForm((f) => (f.referralCode ? f : { ...f, referralCode: saved }));
+      }
+    } catch {
+      /* navegação privada */
+    }
+  }, [params]);
+
+  const hasReferral = isReferralCode(normalizeReferralCode(form.referralCode));
 
   const set = (k: keyof typeof form) => (v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -53,6 +72,11 @@ function RegisterForm() {
     try {
       // Conta criada já ativa e logada: segue direto para o pagamento do plano.
       const res = await api<{ ok: true; planId: string }>('/auth/register', { method: 'POST', body: parsed.data });
+      try {
+        window.localStorage.removeItem(REF_KEY);
+      } catch {
+        /* navegação privada */
+      }
       resetCsrf();
       router.replace(`/assinar/${encodeURIComponent(res.planId)}`);
     } catch (err) {
@@ -99,6 +123,28 @@ function RegisterForm() {
         <Field label="Senha" hint="Mínimo de 10 caracteres, com letras e números." error={errors.password}>
           {(p) => <Input {...p} type="password" autoComplete="new-password" value={form.password} onChange={(e) => set('password')(e.target.value)} />}
         </Field>
+        <Field
+          label="Código de indicação (opcional)"
+          hint={hasReferral ? undefined : `Recebeu um código de outro lojista? Ganhe ${formatBRL(REFERRAL_WELCOME_CENTS)} de desconto na primeira mensalidade.`}
+          error={errors.referralCode}
+          className="sm:col-span-2"
+        >
+          {(p) => (
+            <Input
+              {...p}
+              autoCapitalize="characters"
+              maxLength={20}
+              placeholder="Ex.: K7Q2MX9A"
+              value={form.referralCode}
+              onChange={(e) => set('referralCode')(e.target.value.toUpperCase())}
+            />
+          )}
+        </Field>
+        {hasReferral && (
+          <Alert tone="success" className="sm:col-span-2">
+            Indicação aplicada: {formatBRL(REFERRAL_WELCOME_CENTS)} de desconto na primeira mensalidade (uma única vez).
+          </Alert>
+        )}
         <div className="sm:col-span-2">
           <Checkbox
             checked={form.acceptTerms}

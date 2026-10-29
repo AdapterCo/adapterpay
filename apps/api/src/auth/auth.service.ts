@@ -3,10 +3,12 @@ import QRCode from 'qrcode';
 import {
   generateRecoveryCodes,
   generateTotpSecret,
+  grantWelcomeCredit,
   hmacSha256Hex,
   otpauthUrl,
   randomToken,
   sha256Hex,
+  uniqueReferralCode,
   verifyTotp,
   writeAudit,
   type CoreDeps,
@@ -68,6 +70,22 @@ export class AuthService {
     const existing = await this.deps.prisma.user.findUnique({ where: { email: input.email } });
     if (existing) throw Errors.conflict('Este email já possui cadastro. Faça login ou recupere a senha.');
 
+    const taxIdHash = hmacSha256Hex(this.deps.config.SESSION_SECRET, input.taxId);
+    // Indicação: só no cadastro, e nunca do próprio documento (evita indicar a si mesmo).
+    let referrerId: string | null = null;
+    if (input.referralCode) {
+      const referrer = await this.deps.prisma.tenant.findUnique({
+        where: { referralCode: input.referralCode },
+        select: { id: true, taxIdHash: true, deletedAt: true },
+      });
+      if (!referrer || referrer.deletedAt) throw Errors.validation('Código de indicação não encontrado. Confira o código ou deixe o campo em branco.');
+      if (referrer.taxIdHash === taxIdHash) throw Errors.validation('Não é possível usar o seu próprio código de indicação.');
+      // O desconto de indicação vale uma vez por CPF/CNPJ, mesmo que a empresa abra outra conta.
+      const alreadyReferred = await this.deps.prisma.tenant.count({ where: { taxIdHash, referredByTenantId: { not: null } } });
+      if (alreadyReferred > 0) throw Errors.validation('Este CPF/CNPJ já usou um código de indicação. O desconto vale uma única vez.');
+      referrerId = referrer.id;
+    }
+
     const passwordHash = await hashPassword(input.password);
     let user: User;
     try {
@@ -77,10 +95,13 @@ export class AuthService {
             legalName: input.legalName,
             tradeName: input.tradeName,
             taxIdEnc: this.deps.encryptor.encrypt(input.taxId),
-            taxIdHash: hmacSha256Hex(this.deps.config.SESSION_SECRET, input.taxId),
+            taxIdHash,
             status: 'PENDING_ACTIVATION',
+            referralCode: await uniqueReferralCode(tx),
+            referredByTenantId: referrerId,
           },
         });
+        if (referrerId) await grantWelcomeCredit(tx, tenant.id);
         const u = await tx.user.create({
           data: { email: input.email, name: input.adminName, passwordHash, status: 'ACTIVE', emailVerifiedAt: new Date() },
         });
@@ -96,7 +117,7 @@ export class AuthService {
           resourceType: 'tenant',
           resourceId: tenant.id,
           action: 'tenant.registered',
-          after: { tradeName: tenant.tradeName, planId: plan.id },
+          after: { tradeName: tenant.tradeName, planId: plan.id, referredByTenantId: referrerId },
           ip: meta.ip,
           userAgent: meta.userAgent,
           correlationId: meta.correlationId,

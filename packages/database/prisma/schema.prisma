@@ -151,6 +151,12 @@ model Tenant {
   /// Número conectado, só dígitos com DDI; preenchido quando a instância fica "open"
   whatsappNumber          String?   @map("whatsapp_number")
   whatsappConnectedAt     DateTime? @map("whatsapp_connected_at") @db.Timestamptz(3)
+  /// Código do link de indicação deste lojista (8 caracteres, sem 0/O e 1/I/L)
+  referralCode            String?   @unique @map("referral_code")
+  /// Lojista que indicou este (definido só no cadastro)
+  referredByTenantId      String?   @map("referred_by_tenant_id") @db.Uuid
+  /// Saldo de créditos (indicação) abatido nas próximas mensalidades
+  billingCreditCents      Int       @default(0) @map("billing_credit_cents")
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt    DateTime?    @map("deleted_at") @db.Timestamptz(3)
@@ -172,10 +178,32 @@ model Tenant {
   totemDevices     TotemDevice[]
   restaurantTables RestaurantTable[]
   tableBills       TableBill[]
+  referredBy       Tenant?   @relation("TenantReferrals", fields: [referredByTenantId], references: [id])
+  referrals        Tenant[]  @relation("TenantReferrals")
+  billingCredits   BillingCredit[]
 
   @@index([status])
   @@index([taxIdHash])
+  @@index([referredByTenantId])
   @@map("tenants")
+}
+
+/// Extrato de créditos da assinatura. REFERRAL_WELCOME (+, quem usou o código; uma vez por lojista),
+/// REFERRAL_BONUS (+, quem indicou; uma vez por indicado) e INVOICE (−, abatido numa fatura paga).
+model BillingCredit {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  kind             String
+  amountCents      Int      @map("amount_cents")
+  referredTenantId String?  @map("referred_tenant_id") @db.Uuid
+  invoiceId        String?  @unique @map("invoice_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([kind, referredTenantId])
+  @@index([tenantId, createdAt])
+  @@map("billing_credits")
 }
 
 /// Catálogo de produtos da empresa (cobrança rápida). Preço é sempre o do servidor.
@@ -757,6 +785,8 @@ model Subscription {
   scheduledPlanId    String?            @map("scheduled_plan_id")
   /// Totens contratados (adicional mensal por totem, cobrado a partir da próxima renovação)
   totemQuantity      Int                @default(0) @map("totem_quantity")
+  /// Crédito reservado para a próxima cobrança do cartão (o valor recorrente foi reduzido nesse montante)
+  cardCreditCents    Int                @default(0) @map("card_credit_cents")
   mpPreapprovalId    String?            @unique @map("mp_preapproval_id")
   preapprovalStatus  String?            @map("preapproval_status")
   nextPollAt         DateTime?          @map("next_poll_at") @db.Timestamptz(3)
@@ -781,6 +811,8 @@ model Invoice {
   planId            String        @map("plan_id")
   method            BillingMethod
   amountCents       Int           @map("amount_cents")
+  /// Crédito de indicação abatido desta fatura (amountCents já é o valor líquido). Debitado do saldo no pagamento.
+  creditAppliedCents Int          @default(0) @map("credit_applied_cents")
   /// instante exato de vencimento em UTC
   dueAt             DateTime      @map("due_at") @db.Timestamptz(3)
   periodStart       DateTime?     @map("period_start") @db.Timestamptz(3)

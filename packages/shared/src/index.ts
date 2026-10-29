@@ -12,3 +12,4 @@ export * from './savings';
 export * from './catalog';
 export * from './loyalty';
 export * from './restaurant';
+export * from './referral';

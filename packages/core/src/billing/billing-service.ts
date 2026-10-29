@@ -2,6 +2,7 @@ import type { BillingMethod, Invoice, InvoiceKind, Prisma, Subscription, TxClien
 import {
   acceptedMonthlyAmounts,
   centsToDecimalString,
+  creditDiscountCents,
   excessForPlan,
   prorataUpgradeCents,
   subscriptionMonthlyCents,
@@ -24,6 +25,7 @@ import {
   type MpPayment,
 } from '../mercado-pago';
 import { createNotification } from '../notifications';
+import { applyCreditsOnInvoicePaid, availableCreditCents } from './credits';
 import { addDays, addMonthsUtc, formatInTimezone } from './periods';
 
 /**
@@ -121,23 +123,27 @@ export class BillingService {
     const monthly = subscriptionMonthlyCents(plan, sub.totemQuantity);
 
     if (params.method === 'PIX') {
-      const existing = await this.d.prisma.invoice.findFirst({
-        where: { subscriptionId: sub.id, status: 'OPEN', kind, planId: plan.id, method: 'PIX', amountCents: monthly },
-      });
-      const invoice =
-        existing ??
-        (await this.d.prisma.invoice.create({
+      // Crédito de indicação vira desconto reservado na fatura (sai do saldo só quando ela for paga).
+      const invoice = await this.d.prisma.$transaction(async (tx) => {
+        await lockTenant(tx, params.tenantId);
+        const open = await tx.invoice.findMany({ where: { subscriptionId: sub.id, status: 'OPEN', kind, planId: plan.id, method: 'PIX' } });
+        const existing = open.find((i) => i.amountCents + i.creditAppliedCents === monthly);
+        if (existing) return existing;
+        const discount = creditDiscountCents(monthly, await availableCreditCents(tx, params.tenantId));
+        return tx.invoice.create({
           data: {
             tenantId: params.tenantId,
             subscriptionId: sub.id,
             kind,
             planId: plan.id,
             method: 'PIX',
-            amountCents: monthly,
+            amountCents: monthly - discount,
+            creditAppliedCents: discount,
             dueAt: addDays(new Date(), INITIAL_INVOICE_TTL_DAYS),
             externalReference: this.newExternalReference(),
           },
-        }));
+        });
+      });
       await this.ensurePixForInvoice(invoice.id, params.payerEmail);
       return { invoiceId: invoice.id };
     }
@@ -147,11 +153,19 @@ export class BillingService {
       const pre = await getPreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId);
       if (pre.status === 'pending' && pre.init_point) return { redirectUrl: pre.init_point };
     }
+    // No cartão, o crédito reduz o valor da primeira cobrança; depois dela o valor volta ao normal.
+    const cardDiscount = await this.d.prisma.$transaction(async (tx) => {
+      await lockTenant(tx, params.tenantId);
+      const fresh = await tx.subscription.findUniqueOrThrow({ where: { id: sub.id }, select: { cardCreditCents: true } });
+      const discount = creditDiscountCents(monthly, (await availableCreditCents(tx, params.tenantId)) + fresh.cardCreditCents);
+      await tx.subscription.update({ where: { id: sub.id }, data: { cardCreditCents: discount } });
+      return discount;
+    });
     const pre = await createPreapproval(this.d.mpApi, this.platformToken(), {
       reason: `AdapterPay — Plano ${plan.name}`,
       externalReference: `ADAPTERPAY_SUB_${sub.id.replace(/-/g, '')}`,
       payerEmail: params.payerEmail,
-      amountCents: monthly,
+      amountCents: monthly - cardDiscount,
       backUrl: `${this.d.config.APP_URL}/assinatura/retorno`,
     });
     if (!pre.id || !pre.init_point) throw new BillingError('PROVIDER_ERROR', 'Resposta de assinatura sem init_point');
@@ -265,13 +279,14 @@ export class BillingService {
       await lockTenant(tx, invoice.tenantId);
       const sub = await tx.subscription.findUniqueOrThrow({ where: { id: invoice.subscriptionId } });
       await this.applyPaidInvoice(tx, sub, invoice, paidAt);
+      await applyCreditsOnInvoicePaid(tx, invoice);
       await writeAudit(tx, {
         tenantId: invoice.tenantId,
         actorType: 'WORKER',
         resourceType: 'invoice',
         resourceId: invoice.id,
         action: 'invoice.paid',
-        after: { kind: invoice.kind, amountCents: invoice.amountCents, planId: invoice.planId },
+        after: { kind: invoice.kind, amountCents: invoice.amountCents, creditAppliedCents: invoice.creditAppliedCents, planId: invoice.planId },
       });
       await createNotification(tx, null, {
         tenantId: invoice.tenantId,
@@ -296,7 +311,7 @@ export class BillingService {
         const plan = await tx.plan.findUniqueOrThrow({ where: { id: invoice.planId } });
         // Atualiza o valor recorrente do cartão (plano + totens) para as próximas competências.
         await updatePreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId, {
-          auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(plan, sub.totemQuantity))), currency_id: 'BRL' },
+          auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(plan, sub.totemQuantity) - sub.cardCreditCents)), currency_id: 'BRL' },
         }).catch((err) => this.d.logger.error({ err: (err as Error).message, subId: sub.id }, 'falha ao atualizar valor do cartão'));
       }
       return;
@@ -316,6 +331,8 @@ export class BillingService {
     data.currentPeriodEnd = addMonthsUtc(start, 1);
     data.plan = { connect: { id: invoice.planId } };
     if (sub.scheduledPlanId && sub.scheduledPlanId === invoice.planId) data.scheduledPlan = { disconnect: true };
+    // Reserva do cartão consumida nesta cobrança, ou abandonada porque a assinatura foi paga por Pix.
+    if (invoice.creditAppliedCents > 0 || invoice.method === 'PIX') data.cardCreditCents = 0;
     await tx.subscription.update({ where: { id: sub.id }, data });
     await tx.tenant.update({ where: { id: sub.tenantId }, data: { status: 'ACTIVE', suspendedReason: null } });
   }
@@ -338,13 +355,19 @@ export class BillingService {
     for (const ap of list.results ?? []) {
       const approved = ap.status === 'processed' && ap.payment?.status === 'approved';
       const amount = tryDecimalStringToCents(ap.transaction_amount);
-      if (!approved || amount === null || !allowedAmounts.has(amount) || (ap.currency_id && ap.currency_id !== 'BRL')) continue;
+      if (!approved || amount === null || (ap.currency_id && ap.currency_id !== 'BRL')) continue;
       const reference = `ap_${ap.id}`;
       const exists = await this.d.prisma.invoice.findUnique({ where: { providerReference: reference } });
       if (exists) continue;
       const fresh = await this.d.prisma.subscription.findUniqueOrThrow({ where: { id: sub.id } });
+      // Cobrança com crédito de indicação: veio reduzida exatamente no valor reservado no cartão.
+      const reserved = fresh.cardCreditCents;
+      const discounted = reserved > 0 && allowedAmounts.has(amount + reserved) && (!allowedAmounts.has(amount) || amount + reserved === subscriptionMonthlyCents(sub.plan, sub.totemQuantity));
+      const credit = discounted ? reserved : 0;
+      const gross = amount + credit;
+      if (!allowedAmounts.has(gross)) continue;
       const currentAmounts = new Set(acceptedMonthlyAmounts(sub.plan, sub.totemQuantity));
-      const planId = sub.scheduledPlan && scheduledAmounts.has(amount) && !currentAmounts.has(amount) ? sub.scheduledPlan.id : sub.planId;
+      const planId = sub.scheduledPlan && scheduledAmounts.has(gross) && !currentAmounts.has(gross) ? sub.scheduledPlan.id : sub.planId;
       const paidAt = parsePaidAt(ap.debit_date ?? ap.date_created ?? null);
       const invoice = await this.d.prisma.invoice.create({
         data: {
@@ -354,6 +377,7 @@ export class BillingService {
           planId,
           method: 'CARD',
           amountCents: amount,
+          creditAppliedCents: credit,
           dueAt: fresh.currentPeriodEnd ?? paidAt,
           providerReference: reference,
           providerStatus: ap.status ?? null,
@@ -361,6 +385,7 @@ export class BillingService {
         },
       });
       await this.markInvoicePaid(invoice.id, paidAt, 'processed');
+      if (credit > 0) await this.restoreCardAmount(sub.id);
     }
 
     if (pre.status === 'cancelled' && !sub.cancelAtPeriodEnd && sub.status === 'ACTIVE') {
@@ -390,10 +415,19 @@ export class BillingService {
     for (const sub of subs) {
       const targetPlan = await this.resolveRenewalPlan(sub.tenantId, sub);
       if (sub.method === 'CARD') {
-        if (sub.scheduledPlan && targetPlan.id === sub.scheduledPlan.id && sub.mpPreapprovalId) {
+        if (!sub.mpPreapprovalId) continue;
+        const monthly = subscriptionMonthlyCents(targetPlan, sub.totemQuantity);
+        const downgrade = !!sub.scheduledPlan && targetPlan.id === sub.scheduledPlan.id;
+        // Crédito de indicação: reduz o valor da próxima cobrança do cartão (uma reserva por ciclo).
+        const credit = sub.cardCreditCents > 0 ? sub.cardCreditCents : await this.reserveCardCredit(sub.id, sub.tenantId, monthly);
+        if (downgrade || credit !== sub.cardCreditCents) {
           await updatePreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId, {
-            auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(targetPlan, sub.totemQuantity))), currency_id: 'BRL' },
-          }).catch((err) => this.d.logger.error({ err: (err as Error).message }, 'falha ao aplicar downgrade no cartão'));
+            auto_recurring: { transaction_amount: Number(centsToDecimalString(monthly - credit)), currency_id: 'BRL' },
+          }).catch(async (err) => {
+            this.d.logger.error({ err: (err as Error).message, subId: sub.id }, 'falha ao atualizar valor do cartão na renovação');
+            // Sem o valor reduzido no cartão, a reserva é desfeita: o crédito continua no saldo.
+            if (credit !== sub.cardCreditCents) await this.d.prisma.subscription.update({ where: { id: sub.id }, data: { cardCreditCents: 0 } });
+          });
         }
         continue;
       }
@@ -401,19 +435,25 @@ export class BillingService {
         where: { subscriptionId: sub.id, kind: 'RENEWAL', dueAt: sub.currentPeriodEnd!, status: { in: ['OPEN', 'PAID'] } },
       });
       if (exists) continue;
-      await this.d.prisma.invoice.create({
-        data: {
-          tenantId: sub.tenantId,
-          subscriptionId: sub.id,
-          kind: 'RENEWAL',
-          planId: targetPlan.id,
-          method: 'PIX',
-          amountCents: subscriptionMonthlyCents(targetPlan, sub.totemQuantity),
-          dueAt: sub.currentPeriodEnd!,
-          periodStart: sub.currentPeriodEnd!,
-          periodEnd: addMonthsUtc(sub.currentPeriodEnd!, 1),
-          externalReference: this.newExternalReference(),
-        },
+      await this.d.prisma.$transaction(async (tx) => {
+        await lockTenant(tx, sub.tenantId);
+        const monthly = subscriptionMonthlyCents(targetPlan, sub.totemQuantity);
+        const discount = creditDiscountCents(monthly, await availableCreditCents(tx, sub.tenantId));
+        await tx.invoice.create({
+          data: {
+            tenantId: sub.tenantId,
+            subscriptionId: sub.id,
+            kind: 'RENEWAL',
+            planId: targetPlan.id,
+            method: 'PIX',
+            amountCents: monthly - discount,
+            creditAppliedCents: discount,
+            dueAt: sub.currentPeriodEnd!,
+            periodStart: sub.currentPeriodEnd!,
+            periodEnd: addMonthsUtc(sub.currentPeriodEnd!, 1),
+            externalReference: this.newExternalReference(),
+          },
+        });
       });
       await createNotification(this.d.prisma, this.d.events, {
         tenantId: sub.tenantId,
@@ -425,6 +465,36 @@ export class BillingService {
       issued++;
     }
     return issued;
+  }
+
+  /** Reserva crédito para a próxima cobrança do cartão. Devolve o desconto reservado (0 se não houver saldo). */
+  private async reserveCardCredit(subscriptionId: string, tenantId: string, monthlyCents: number): Promise<number> {
+    return this.d.prisma.$transaction(async (tx) => {
+      await lockTenant(tx, tenantId);
+      const fresh = await tx.subscription.findUniqueOrThrow({ where: { id: subscriptionId }, select: { cardCreditCents: true } });
+      if (fresh.cardCreditCents > 0) return fresh.cardCreditCents;
+      const discount = creditDiscountCents(monthlyCents, await availableCreditCents(tx, tenantId));
+      if (discount > 0) await tx.subscription.update({ where: { id: subscriptionId }, data: { cardCreditCents: discount } });
+      return discount;
+    });
+  }
+
+  /** Depois da cobrança com crédito, o cartão volta a cobrar o valor cheio. */
+  private async restoreCardAmount(subscriptionId: string): Promise<void> {
+    const sub = await this.d.prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionId }, include: { plan: true } });
+    if (!sub.mpPreapprovalId || sub.cardCreditCents > 0) return;
+    await updatePreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId, {
+      auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(sub.plan, sub.totemQuantity))), currency_id: 'BRL' },
+    }).catch(async (err) => {
+      this.d.logger.error({ err: (err as Error).message, subId: sub.id }, 'falha ao restaurar valor do cartão após crédito');
+      await createNotification(this.d.prisma, this.d.events, {
+        tenantId: sub.tenantId,
+        kind: 'subscription.card_amount_failed',
+        title: 'Valor da assinatura no cartão não atualizado',
+        body: 'O crédito de indicação foi usado, mas não foi possível voltar o valor do cartão ao normal. A equipe Adapter Co. foi avisada pelos registros.',
+        link: '/app/assinatura',
+      });
+    });
   }
 
   private async resolveRenewalPlan(
@@ -623,7 +693,7 @@ export class BillingService {
     });
     if (sub.method === 'CARD' && sub.mpPreapprovalId && sub.status === 'ACTIVE') {
       await updatePreapproval(this.d.mpApi, this.platformToken(), sub.mpPreapprovalId, {
-        auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(sub.plan, quantity))), currency_id: 'BRL' },
+        auto_recurring: { transaction_amount: Number(centsToDecimalString(subscriptionMonthlyCents(sub.plan, quantity) - sub.cardCreditCents)), currency_id: 'BRL' },
       }).catch(async (err) => {
         this.d.logger.error({ err: (err as Error).message, subId: sub.id }, 'falha ao atualizar valor do cartão (totens)');
         await createNotification(this.d.prisma, this.d.events, {

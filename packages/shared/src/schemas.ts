@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAX_CHARGE_CENTS } from './money';
 import { TENANT_ROLES } from './roles';
+import { isReferralCode, normalizeReferralCode } from './referral';
 import { normalizeBrWhatsApp } from './savings';
 
 /** Schemas de entrada compartilhados entre API (validação autoritativa) e frontend (validação de formulário). */
@@ -33,6 +34,14 @@ export const registerSchema = z.object({
   email,
   password: passwordSchema,
   acceptTerms: z.literal(true, { errorMap: () => ({ message: 'É necessário aceitar os termos' }) }),
+  /** Código de indicação (opcional): R$ 10,00 de desconto uma única vez, na primeira mensalidade. */
+  referralCode: z
+    .string()
+    .max(20)
+    .transform(normalizeReferralCode)
+    .refine((v) => v === '' || isReferralCode(v), 'Código de indicação inválido')
+    .transform((v) => v || undefined)
+    .optional(),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 
