@@ -3,6 +3,7 @@ import { MAX_CHARGE_CENTS } from './money';
 import { TENANT_ROLES } from './roles';
 import { isReferralCode, normalizeReferralCode } from './referral';
 import { normalizeBrWhatsApp } from './savings';
+import { paymentLinkCustomerSchema } from './payment-links';
 
 /** Schemas de entrada compartilhados entre API (validação autoritativa) e frontend (validação de formulário). */
 
@@ -181,6 +182,8 @@ export const createChargeSchema = z.object({
       rewardCode: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{6}$/, 'Código inválido').optional(),
     })
     .optional(),
+  /** Link de pagamento: mesma cobrança, válida por 24 h, com o nome do cliente para a aba de links. */
+  paymentLink: paymentLinkCustomerSchema.optional(),
 });
 
 export const loyaltyCustomerSchema = z.object({
@@ -267,6 +270,8 @@ export const listChargesQuerySchema = z.object({
   sellerId: uuid.optional(),
   status: z.string().max(20).optional(),
   q: z.string().trim().max(80).optional(),
+  /** "true": somente links de pagamento (aba Links), com resumo por situação. */
+  paymentLink: z.enum(['true', 'false']).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),

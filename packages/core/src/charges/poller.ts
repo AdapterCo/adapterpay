@@ -28,10 +28,17 @@ export function nextPollDelayMs(params: {
   expiresAt: Date | null;
   now: Date;
   status: ChargeStatus;
+  /** link de pagamento (24 h): consulta rápida no começo e espaçada depois, até perto do vencimento */
+  paymentLinkCreatedAt?: Date | null;
 }): number {
   const base = params.baseSeconds * 1000;
   if (!params.expiresAt) return base;
   const past = params.now.getTime() - params.expiresAt.getTime();
+  if (params.paymentLinkCreatedAt && past < -60_000) {
+    const age = params.now.getTime() - params.paymentLinkCreatedAt.getTime();
+    const cadence = age < 15 * 60_000 ? 15_000 : age < 2 * 3600_000 ? 60_000 : 5 * 60_000;
+    return Math.max(base, Math.min(cadence, -past - 30_000));
+  }
   if (past < 60_000) return base;
   if (past < 15 * 60_000) return 10_000;
   if (past < 24 * 3600_000) return 60_000;
@@ -162,7 +169,13 @@ async function pollWithLease(deps: CoreDeps, chargeId: string, now: Date): Promi
     return { nextDelayMs: wait, status: applied.status };
   }
 
-  const delay = nextPollDelayMs({ baseSeconds: base, expiresAt: charge.expiresAt, now, status: applied.status });
+  const delay = nextPollDelayMs({
+    baseSeconds: base,
+    expiresAt: charge.expiresAt,
+    now,
+    status: applied.status,
+    paymentLinkCreatedAt: charge.isPaymentLink ? charge.createdAt : null,
+  });
   await schedule(deps, chargeId, delay, false);
   return { nextDelayMs: delay, status: applied.status };
 }

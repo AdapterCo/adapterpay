@@ -20,7 +20,6 @@ import { TotemsModule } from './totems/totems.module';
 import { RestaurantModule } from './restaurant/restaurant.module';
 import { PublicModule } from './public/public.module';
 import { PartnersModule } from './partners/partners.module';
-import { PaymentLinksModule } from './payment-links/payment-links.module';
 import { ReportsModule } from './reports/reports.module';
 import { StoresModule } from './stores/stores.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
@@ -44,7 +43,6 @@ import { UsersModule } from './users/users.module';
     RestaurantModule,
     PublicModule,
     PartnersModule,
-    PaymentLinksModule,
     EventsModule,
     ReportsModule,
     UsersModule,

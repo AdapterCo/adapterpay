@@ -1,23 +1,6 @@
 import { tryDecimalStringToCents } from '@adapterpay/shared';
 import type { CoreDeps } from '../context';
-import { getPayment, MpApiError, type MpPayment } from '../mercado-pago';
-
-/** Tarifa do recebedor e líquido de um pagamento do MP. Campo ausente ou ilegível => null (nunca 0 inventado). */
-export function paymentFees(remote: MpPayment): { feeCents: number | null; netAmountCents: number | null } {
-  let feeCents: number | null = null;
-  if (Array.isArray(remote.fee_details)) {
-    feeCents = 0;
-    for (const f of remote.fee_details.filter((x) => !x.fee_payer || x.fee_payer === 'collector')) {
-      const c = tryDecimalStringToCents(f.amount);
-      if (c === null) {
-        feeCents = null;
-        break;
-      }
-      feeCents += c;
-    }
-  }
-  return { feeCents, netAmountCents: tryDecimalStringToCents(remote.transaction_details?.net_received_amount) };
-}
+import { getPayment, MpApiError } from '../mercado-pago';
 
 /**
  * Tarifa efetiva e valor líquido (seção 16). Consulta GET /v1/payments/{reference_id} na conta
@@ -36,7 +19,20 @@ export async function syncPaymentFees(deps: CoreDeps, limit = 20): Promise<numbe
     try {
       const { accessToken } = await deps.tokens.getAccessToken(p.mpConnectionId);
       const remote = await deps.guard.run(p.mpConnectionId, () => getPayment(deps.mpApi, accessToken, p.mpReferenceId!));
-      const { feeCents, netAmountCents: net } = paymentFees(remote);
+      const collectorFees = (remote.fee_details ?? []).filter((f) => !f.fee_payer || f.fee_payer === 'collector');
+      let feeCents: number | null = null;
+      if (Array.isArray(remote.fee_details)) {
+        feeCents = 0;
+        for (const f of collectorFees) {
+          const c = tryDecimalStringToCents(f.amount);
+          if (c === null) {
+            feeCents = null;
+            break;
+          }
+          feeCents += c;
+        }
+      }
+      const net = tryDecimalStringToCents(remote.transaction_details?.net_received_amount);
       await deps.prisma.payment.update({
         where: { id: p.id },
         data: { feeCents, netAmountCents: net, feeSyncedAt: new Date(), feeSyncAttempts: { increment: 1 } },

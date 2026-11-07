@@ -2,7 +2,6 @@ import type { Queue } from 'bullmq';
 import {
   runDailyReports,
   runLoyaltyNotifications,
-  runPaymentLinkPolls,
   syncPaymentFees,
   syncPos,
   WORKER_HEARTBEAT_KEY,
@@ -15,7 +14,6 @@ export type MaintenanceJobName =
   | 'heartbeat'
   | 'billing-cycle'
   | 'invoice-poll'
-  | 'payment-link-poll'
   | 'preapproval-poll'
   | 'fee-sync'
   | 'pos-sync'
@@ -39,7 +37,6 @@ export async function registerSchedulers(queue: Queue): Promise<void> {
     ['sweep', 5_000],
     ['heartbeat', 10_000],
     ['invoice-poll', 15_000],
-    ['payment-link-poll', 10_000],
     ['billing-cycle', 60_000],
     ['preapproval-poll', 60_000],
     ['fee-sync', 120_000],
@@ -104,9 +101,6 @@ export async function runMaintenance(name: MaintenanceJobName, ctx: Ctx): Promis
       }
       return { polled: invoices.length };
     }
-
-    case 'payment-link-poll':
-      return { polled: await runPaymentLinkPolls(deps, 100) };
 
     case 'preapproval-poll': {
       const subs = await deps.prisma.subscription.findMany({

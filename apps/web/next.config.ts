@@ -26,7 +26,7 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: '/(p|c|l)/:path*',
+        source: '/(p|c)/:path*',
         headers: [
           { key: 'Cache-Control', value: 'no-store' },
           { key: 'X-Robots-Tag', value: 'noindex, nofollow' },

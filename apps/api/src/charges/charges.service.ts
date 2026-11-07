@@ -14,7 +14,7 @@ import {
   type CoreDeps,
 } from '@adapterpay/core';
 import { isPgUniqueViolation, isUniqueViolation, type ChargeStatus, type Prisma } from '@adapterpay/database';
-import { cartDescription, cartTotalCents, ERROR_CODES, evaluateOrder, MAX_CHARGE_CENTS, type CartLine, type CreateChargeInput, type listChargesQuerySchema } from '@adapterpay/shared';
+import { cartDescription, cartTotalCents, ERROR_CODES, evaluateOrder, MAX_CHARGE_CENTS, normalizeSearchName, type CartLine, type CreateChargeInput, type listChargesQuerySchema } from '@adapterpay/shared';
 import type { z } from 'zod';
 import { assertStoreAccess, storeScope } from '../common/access';
 import { AppError, Errors } from '../common/errors';
@@ -179,6 +179,14 @@ export class ChargesService {
             totemId: opts.totemId ?? null,
             tableBillId: opts.tableBillId ?? null,
             orderNumber,
+            ...(input.paymentLink
+              ? {
+                  isPaymentLink: true,
+                  customerName: input.paymentLink.customerName,
+                  customerSearch: normalizeSearchName(input.paymentLink.customerName),
+                  customerPhone: input.paymentLink.customerPhone ?? null,
+                }
+              : {}),
           },
         });
         if (reward) {
@@ -212,7 +220,7 @@ export class ChargesService {
           resourceType: 'charge',
           resourceId: charge.id,
           action: 'charge.created',
-          after: { posId: pos.id, amountCents: input.amountCents, externalReference: charge.externalReference },
+          after: { posId: pos.id, amountCents: input.amountCents, externalReference: charge.externalReference, paymentLink: !!input.paymentLink },
           ip: meta.ip,
           correlationId: meta.correlationId,
         });
@@ -285,7 +293,7 @@ export class ChargesService {
       ...(q.storeId ? { storeId: q.storeId } : {}),
       ...(q.posId ? { posId: q.posId } : {}),
       ...(q.sellerId ? { sellerId: q.sellerId } : {}),
-      ...(q.status ? { status: q.status as ChargeStatus } : {}),
+      ...(q.paymentLink ? { isPaymentLink: q.paymentLink === 'true' } : {}),
       ...(q.from || q.to ? { createdAt: { ...(q.from ? { gte: new Date(q.from) } : {}), ...(q.to ? { lte: new Date(q.to) } : {}) } } : {}),
       ...(q.q
         ? {
@@ -293,6 +301,7 @@ export class ChargesService {
               { externalReference: { contains: q.q, mode: 'insensitive' } },
               { orderId: { contains: q.q } },
               { description: { contains: q.q, mode: 'insensitive' } },
+              { customerSearch: { contains: normalizeSearchName(q.q) } },
             ],
           }
         : {}),
@@ -303,7 +312,10 @@ export class ChargesService {
       const from = q.from ? new Date(q.from) : null;
       where.createdAt = { gte: from && from > since ? from : since, ...(q.to ? { lte: new Date(q.to) } : {}) };
     }
-    const [total, items] = await Promise.all([
+    const baseWhere = { ...where };
+    // Aceita uma lista ("CREATING,PENDING,RECONCILING" = em aberto na aba Links).
+    if (q.status) where.status = q.status.includes(',') ? { in: q.status.split(',') as ChargeStatus[] } : (q.status as ChargeStatus);
+    const [total, items, summaryRows] = await Promise.all([
       this.deps.prisma.charge.count({ where }),
       this.deps.prisma.charge.findMany({
         where,
@@ -317,11 +329,19 @@ export class ChargesService {
           payments: { select: { feeCents: true, netAmountCents: true, paidAmountCents: true } },
         },
       }),
+      // Aba Links: quantidade e soma por situação (ignora o filtro de situação, respeita busca e loja).
+      q.paymentLink === 'true'
+        ? this.deps.prisma.charge.groupBy({ by: ['status'], where: baseWhere, _count: { _all: true }, _sum: { amountCents: true } })
+        : Promise.resolve(null),
     ]);
+    const summary = summaryRows
+      ? Object.fromEntries(summaryRows.map((r) => [r.status, { count: r._count._all, amountCents: r._sum.amountCents ?? 0 }]))
+      : undefined;
     return {
       total,
       page: q.page,
       pageSize: q.pageSize,
+      summary,
       items: items.map((c) => ({
         id: c.id,
         status: c.status,
@@ -340,6 +360,10 @@ export class ChargesService {
         paidAt: c.paidAt,
         feeCents: c.payments[0]?.feeCents ?? null,
         netAmountCents: c.payments[0]?.netAmountCents ?? null,
+        isPaymentLink: c.isPaymentLink,
+        customerName: c.customerName,
+        customerPhone: c.customerPhone,
+        publicChargeUrl: c.isPaymentLink ? this.publicChargeUrl(c.publicToken) : null,
       })),
     };
   }
@@ -402,6 +426,9 @@ export class ChargesService {
       loyaltyCustomerName: c.loyaltyCustomer?.name ?? null,
       orderNumber: c.orderNumber,
       fulfillmentStatus: c.fulfillmentStatus,
+      isPaymentLink: c.isPaymentLink,
+      customerName: c.customerName,
+      customerPhone: c.customerPhone,
     };
   }
 

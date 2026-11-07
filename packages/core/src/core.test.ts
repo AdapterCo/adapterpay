@@ -119,6 +119,16 @@ describe('polling', () => {
     expect(nextPollDelayMs({ baseSeconds: 3, expiresAt: exp, now: new Date('2026-01-01T00:05:00Z'), status: 'PENDING' })).toBe(10000);
     expect(nextPollDelayMs({ baseSeconds: 3, expiresAt: exp, now: new Date('2026-01-01T01:00:00Z'), status: 'RECONCILING' })).toBe(60000);
   });
+  it('link de pagamento de 24 h: rápido no começo, espaçado depois e volta ao normal no vencimento', () => {
+    const created = new Date('2026-01-01T00:00:00Z');
+    const exp = new Date('2026-01-02T00:00:00Z');
+    const at = (iso: string) => nextPollDelayMs({ baseSeconds: 3, expiresAt: exp, now: new Date(iso), status: 'PENDING', paymentLinkCreatedAt: created });
+    expect(at('2026-01-01T00:05:00Z')).toBe(15_000);
+    expect(at('2026-01-01T01:00:00Z')).toBe(60_000);
+    expect(at('2026-01-01T10:00:00Z')).toBe(300_000);
+    expect(at('2026-01-01T23:58:00Z')).toBe(90_000);
+    expect(at('2026-01-01T23:59:30Z')).toBe(3000);
+  });
   it('backoff com jitter limitado', () => {
     expect(backoffWithJitter(0, 3000, 60000, () => 0)).toBe(3000);
     expect(backoffWithJitter(10, 3000, 60000, () => 1)).toBe(60000);

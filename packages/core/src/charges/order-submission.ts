@@ -1,4 +1,4 @@
-import type { MpOrder } from '@adapterpay/shared';
+import { PAYMENT_LINK_EXPIRATION_ISO, type MpOrder } from '@adapterpay/shared';
 import { isoDurationToSeconds } from '../config';
 import type { CoreDeps } from '../context';
 import { MpReconnectRequiredError } from '../connections/token-service';
@@ -49,7 +49,8 @@ export async function submitOrder(deps: CoreDeps, chargeId: string): Promise<Sub
     amountCents: charge.amountCents,
     externalReference: charge.externalReference,
     externalPosId: charge.externalPosId,
-    expirationIso: deps.config.chargeExpirationIso,
+    // Link de pagamento: mesma Order, só com validade de 24 h.
+    expirationIso: charge.isPaymentLink ? PAYMENT_LINK_EXPIRATION_ISO : deps.config.chargeExpirationIso,
   });
 
   await recordSubmissionAttempt(deps, chargeId);

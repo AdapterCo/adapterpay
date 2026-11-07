@@ -57,10 +57,13 @@ export function CopyButton({ text, label = 'Copiar', copiedLabel = 'Copiado!', c
 /** Contador informativo baseado em expires_at do backend corrigido pelo relógio do servidor. */
 export function Countdown({ expiresAt, serverOffsetMs, now }: { expiresAt: string; serverOffsetMs: number; now: number }) {
   const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - (now + serverOffsetMs)) / 1000));
-  const mm = String(Math.floor(remaining / 60)).padStart(2, '0');
+  const h = Math.floor(remaining / 3600);
+  const mm = String(Math.floor((remaining % 3600) / 60)).padStart(2, '0');
   const ss = String(remaining % 60).padStart(2, '0');
+  // Links de pagamento valem 24 h: acima de 1 hora mostra h:mm:ss.
   return (
-    <span className={`tabular-nums ${remaining <= 30 ? 'text-red-600' : ''}`} aria-label={`Tempo restante ${mm} minutos e ${ss} segundos`}>
+    <span className={`tabular-nums ${remaining <= 30 ? 'text-red-600' : ''}`} aria-label={`Tempo restante ${h > 0 ? `${h} horas, ` : ''}${mm} minutos e ${ss} segundos`}>
+      {h > 0 ? `${h}:` : ''}
       {mm}:{ss}
     </span>
   );
