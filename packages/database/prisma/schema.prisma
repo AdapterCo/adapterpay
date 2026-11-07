@@ -168,6 +168,7 @@ model Tenant {
   mpConnections MpConnection[]
   posTerminals  PosTerminal[]
   charges       Charge[]
+  paymentLinks  PaymentLink[]
   subscription  Subscription?
   invoices      Invoice[]
   auditLogs     AuditLog[]
@@ -499,6 +500,7 @@ model User {
   sessions         Session[]
   emailTokens      EmailToken[]
   charges          Charge[]           @relation("ChargeSeller")
+  paymentLinks     PaymentLink[]      @relation("PaymentLinkCreator")
   totemDevices     TotemDevice[]      @relation("TotemUser")
   notifications    Notification[]
 
@@ -598,6 +600,7 @@ model Store {
   mpConnection MpConnection?     @relation(fields: [mpConnectionId], references: [id])
   posTerminals PosTerminal[]
   charges      Charge[]
+  paymentLinks PaymentLink[]
   memberships  StoreMembership[]
 
   @@unique([id, tenantId])
@@ -629,6 +632,7 @@ model MpConnection {
   stores       Store[]
   posTerminals PosTerminal[]
   charges      Charge[]
+  paymentLinks PaymentLink[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, mpUserId])
@@ -963,4 +967,49 @@ model Notification {
 
   @@index([tenantId, createdAt])
   @@map("notifications")
+}
+
+/// Link de pagamento externo: Pix avulso (/v1/payments) na conta MP da loja, válido por 24 h.
+/// Não usa POS. Status: PENDING | PAID | EXPIRED | CANCELLED (CHECK na migration).
+model PaymentLink {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  storeId           String    @map("store_id") @db.Uuid
+  mpConnectionId    String    @map("mp_connection_id") @db.Uuid
+  createdById       String    @map("created_by_id") @db.Uuid
+  customerName      String    @map("customer_name")
+  /// nome sem acentos e minúsculo, para a busca
+  customerSearch    String    @map("customer_search")
+  /// WhatsApp do cliente (55DDDNÚMERO), opcional
+  customerPhone     String?   @map("customer_phone")
+  description       String?
+  amountCents       Int       @map("amount_cents")
+  status            String    @default("PENDING")
+  externalReference String    @unique @map("external_reference")
+  /// token aleatório não enumerável para /l/:publicToken
+  publicToken       String    @unique @map("public_token")
+  mpPaymentId       String?   @map("mp_payment_id")
+  pixCopyPaste      String?   @map("pix_copy_paste")
+  providerStatus    String?   @map("provider_status")
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(3)
+  paidAt            DateTime? @map("paid_at") @db.Timestamptz(3)
+  cancelledAt       DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  /// tarifa e líquido do MP quando informados (null = não informado, nunca 0 inventado)
+  feeCents          Int?      @map("fee_cents")
+  netAmountCents    Int?      @map("net_amount_cents")
+  nextPollAt        DateTime? @map("next_poll_at") @db.Timestamptz(3)
+  lastPolledAt      DateTime? @map("last_polled_at") @db.Timestamptz(3)
+  lastError         String?   @map("last_error")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  store        Store        @relation(fields: [storeId, tenantId], references: [id, tenantId])
+  mpConnection MpConnection @relation(fields: [mpConnectionId, tenantId], references: [id, tenantId])
+  createdBy    User         @relation("PaymentLinkCreator", fields: [createdById], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([status, nextPollAt])
+  @@map("payment_links")
 }

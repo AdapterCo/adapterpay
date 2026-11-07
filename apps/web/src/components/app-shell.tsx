@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { href: '/app', label: 'Painel' },
   { href: '/app/cobrancas/nova', label: 'Nova cobrança', perm: 'charges:create' },
   { href: '/app/cobrancas', label: 'Cobranças', perm: 'charges:read' },
+  { href: '/app/links', label: 'Links de pagamento', perm: 'charges:read' },
   { href: '/app/mesas', label: 'Mesas', perm: 'tables:operate', restaurantOnly: true },
   { href: '/app/pedidos', label: 'Pedidos', perm: 'orders:manage' },
   { href: '/app/produtos', label: 'Produtos', perm: 'products:manage' },

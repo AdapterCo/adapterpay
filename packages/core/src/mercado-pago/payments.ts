@@ -78,6 +78,39 @@ export async function createPlatformPixPayment(
   });
 }
 
+/**
+ * Pix avulso na conta do LOJISTA (link de pagamento externo), com o token OAuth da conexão.
+ * Sem notification_url: o pagamento é acompanhado por polling, como as faturas.
+ */
+export async function createStorePixPayment(
+  http: MercadoPagoHttp,
+  accessToken: string,
+  params: {
+    amountCents: number;
+    description: string;
+    externalReference: string;
+    payerEmail: string;
+    payerFirstName: string;
+    expiresAt: Date;
+    idempotencyKey: string;
+  },
+): Promise<MpPayment> {
+  return http.request<MpPayment>({
+    method: 'POST',
+    path: '/v1/payments',
+    accessToken,
+    idempotencyKey: params.idempotencyKey,
+    body: {
+      transaction_amount: Number(centsToDecimalString(params.amountCents)),
+      description: params.description,
+      payment_method_id: 'pix',
+      external_reference: params.externalReference,
+      date_of_expiration: params.expiresAt.toISOString().replace('Z', '+00:00'),
+      payer: { email: params.payerEmail, first_name: params.payerFirstName },
+    },
+  });
+}
+
 /** Cancela Pix pendente antes de gerar outro para a mesma fatura (evita dois QR válidos). */
 export async function cancelPayment(http: MercadoPagoHttp, accessToken: string, paymentId: string): Promise<MpPayment> {
   if (!/^\d{1,24}$/.test(paymentId)) throw new Error('payment_id inválido');

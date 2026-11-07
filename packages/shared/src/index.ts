@@ -14,3 +14,4 @@ export * from './loyalty';
 export * from './restaurant';
 export * from './referral';
 export * from './partners';
+export * from './payment-links';
